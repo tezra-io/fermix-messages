@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  TCC identity for the Fermix Messages helper (the iMessage channel's principal).
+  This process is what macOS grants Full Disk Access (to read ~/Library/Messages/chat.db)
+  and Automation -> Messages (to send through Messages.app) to, so it needs a STABLE,
+  path-independent code identity: a real bundle id that survives the version-keyed
+  install path under FERMIX_HOME/plugins/imessage_helper/<ver>/. The bundle also gives
+  the System Settings privacy rows a name and an icon.
+  CFBundleIdentifier is a PERMANENT TCC key - never change it across versions.
+  The display name is "Fermix Messages", deliberately DISTINCT from the FermixPet
+  companion ("Fermix") and from "Fermix Computer Use" (compux): three principals,
+  three names, one shared icon.
+  NSAppleEventsUsageDescription is what lets tccd show the Automation consent dialog
+  instead of refusing with -1743; the matching hardened-runtime entitlement is in
+  bundle/fermix-messages.entitlements.
+  __VERSION__ is substituted by scripts/build_app.sh.
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>io.tezra.fermix.messages</string>
+  <key>CFBundleName</key><string>Fermix Messages</string>
+  <key>CFBundleDisplayName</key><string>Fermix Messages</string>
+  <key>CFBundleExecutable</key><string>fermix-messages</string>
+  <key>CFBundleIconFile</key><string>Fermix</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleShortVersionString</key><string>__VERSION__</string>
+  <key>CFBundleVersion</key><string>__VERSION__</string>
+  <key>LSUIElement</key><true/>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>NSAppleEventsUsageDescription</key><string>Fermix sends the replies you asked for through the Messages app.</string>
+</dict>
+</plist>

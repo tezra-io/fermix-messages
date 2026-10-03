@@ -1,0 +1,137 @@
+name: release
+# Tag `vX.Y.Z` and push it. Builds a universal (arm64 + x86_64) binary, wraps it in the
+# Developer-ID-signed, notarized, STAPLED "Fermix Messages.app", ditto-zips it, sha256s
+# it, cosign-signs it (keyless/OIDC), attaches everything to a GitHub Release and prints
+# the pin to paste into the engine's FermixCore.IMessage.HelperInstaller.
+#
+# Artifact: fermix-messages-<ver>-macos-universal.zip (+ .sha256, .sig, .pem).
+#
+# Signing is MANDATORY: the build fails loud if any Apple secret is absent. Required
+# repo secrets (the same seven the compux repo uses):
+#   MACOS_CERT_P12_BASE64 MACOS_CERT_PASSWORD MACOS_KEYCHAIN_PASSWORD MACOS_DEVELOPER_ID
+#   APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch: {}
+permissions:
+  contents: write
+  id-token: write
+jobs:
+  build:
+    name: build macos-universal
+    runs-on: macos-15
+    env:
+      REF_NAME: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate signing secrets are complete
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+          MACOS_DEVELOPER_ID: ${{ secrets.MACOS_DEVELOPER_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=""
+          for v in MACOS_CERT_P12_BASE64 MACOS_CERT_PASSWORD MACOS_KEYCHAIN_PASSWORD \
+                   MACOS_DEVELOPER_ID APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error title=Missing signing secrets::macOS signing is mandatory but these secrets are unset:$missing"
+            exit 1
+          fi
+      - name: Build universal binary
+        run: |
+          set -euo pipefail
+          swift build -c release --arch arm64 --arch x86_64
+          BIN=".build/apple/Products/Release/fermix-messages"
+          lipo -archs "$BIN"
+          echo "bin=$BIN" >> "$GITHUB_ENV"
+      - name: Test
+        run: swift test
+      - name: Import Developer ID certificate
+        env:
+          CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          echo "$CERT_P12_BASE64" | base64 --decode > cert.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security import cert.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          rm -f cert.p12
+      - name: Build, sign, notarize + staple the bundle
+        env:
+          DEVELOPER_ID: ${{ secrets.MACOS_DEVELOPER_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          VERSION="${REF_NAME#v}"
+          scripts/build_app.sh "$bin" dist "$VERSION" "$DEVELOPER_ID"
+          APP="dist/Fermix Messages.app"
+          ditto -c -k --keepParent "$APP" notarize.zip
+          sub_id=$(xcrun notarytool submit notarize.zip \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" \
+            --output-format json | jq -r '.id')
+          rm -f notarize.zip
+          echo "notarization submission: $sub_id"
+          state="In Progress"
+          for attempt in $(seq 1 48); do
+            state=$(xcrun notarytool info "$sub_id" \
+              --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" \
+              --output-format json 2>/dev/null | jq -r '.status' || echo "network-error")
+            echo "notarization status ($attempt/48): $state"
+            case "$state" in
+              "Accepted") break ;;
+              "Invalid"|"Rejected") break ;;
+              *) sleep 150 ;;
+            esac
+          done
+          if [ "$state" != "Accepted" ]; then
+            echo "::error title=Notarization did not complete::status=$state (submission $sub_id)"
+            xcrun notarytool log "$sub_id" \
+              --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" || true
+            exit 1
+          fi
+          xcrun stapler staple "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+      - name: Package artifact + sha256
+        run: |
+          set -euo pipefail
+          VERSION="${REF_NAME#v}"
+          OUT="fermix-messages-${VERSION}-macos-universal.zip"
+          ditto -c -k --keepParent "dist/Fermix Messages.app" "$OUT"
+          shasum -a 256 "$OUT" | awk '{print $1}' > "$OUT.sha256"
+          echo "artifact=$OUT" >> "$GITHUB_ENV"
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: cosign sign-blob (keyless)
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --output-signature "${artifact}.sig" \
+            --output-certificate "${artifact}.pem" \
+            "${artifact}"
+      - name: Print the engine pin
+        run: |
+          set -euo pipefail
+          echo "HelperInstaller pin for ${REF_NAME}:"
+          echo "  version: \"${REF_NAME#v}\", sha256: \"$(cat "${artifact}.sha256")\""
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$REF_NAME" \
+            --notes "Fermix Messages helper $REF_NAME. Pin the .sha256 in the engine's HelperInstaller." \
+            "$artifact" "$artifact.sha256" "$artifact.sig" "$artifact.pem"

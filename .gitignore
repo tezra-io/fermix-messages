@@ -1,0 +1,6 @@
+.build/
+*.app/
+*.zip
+*.zip.sha256
+.DS_Store
+/dist/

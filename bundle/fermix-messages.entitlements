@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Sending through Messages.app is an Apple Event; under the hardened runtime the
+       sender must declare it or tccd refuses with -1743 and shows no dialog. -->
+  <key>com.apple.security.automation.apple-events</key><true/>
+</dict>
+</plist>
