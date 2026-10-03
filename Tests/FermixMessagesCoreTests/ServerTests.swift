@@ -79,7 +79,8 @@ final class ServerHarness {
         let sender = Sender(ledger: base.ledger, database: { [location = watch.fixture.location] in
                                 ChatDB.open(location)
                             }, scripting: base.messages,
-                            staging: Staging(root: watch.fixture.location.stagingRoot, fileCap: 1 << 20, rootCap: 1 << 30),
+                            staging: Staging(root: watch.fixture.location.stagingRoot, fileCap: 1 << 20, rootCap: 1 << 30,
+                                             log: base.log.logger),
                             outbox: base.paths.outbox, policy: base.policy, automation: { .granted }, now: Date.init,
                             timing: VerifyTiming(timeout: 0.5, interval: 0.02), log: base.log.logger,
                             onReconciled: { [output] event in

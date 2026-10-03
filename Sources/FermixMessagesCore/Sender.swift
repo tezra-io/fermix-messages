@@ -100,6 +100,7 @@ struct Staging {
     let root: String
     let fileCap: Int64
     let rootCap: Int64
+    let log: Logger
 
     static let standardFileCap: Int64 = 100 * 1024 * 1024
     static let standardRootCap: Int64 = 1024 * 1024 * 1024
@@ -122,7 +123,11 @@ struct Staging {
         case .success(let copied):
             return .success(StagedFile(path: destination, sha256: copied.sha256))
         case .failure(let failure):
-            try? FileManager.default.removeItem(atPath: directory)
+            do {
+                try FileManager.default.removeItem(atPath: directory)
+            } catch {
+                log.event("staging_cleanup_failed", ["error": String(describing: error)])
+            }
             return .failure(failure)
         }
     }
@@ -376,8 +381,13 @@ final class Sender {
             defer { db.close() }
             return reconcile(db)
         case .failure(let failure):
-            if let pending = try? ledger.dispatched(), !pending.isEmpty {
-                log.event("reconcile_deferred", ["pending": String(pending.count), "db": "\(failure)"])
+            do {
+                let pending = try ledger.dispatched()
+                if !pending.isEmpty {
+                    log.event("reconcile_deferred", ["pending": String(pending.count), "db": "\(failure)"])
+                }
+            } catch {
+                log.event("reconcile_failed", ["error": String(describing: error)])
             }
             return []
         }

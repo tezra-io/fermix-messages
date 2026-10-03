@@ -34,7 +34,8 @@ final class SendHarness {
 
     func sender() -> Sender {
         Sender(ledger: ledger, database: { [fixture] in ChatDB.open(fixture.location) }, scripting: messages,
-               staging: Staging(root: fixture.location.stagingRoot, fileCap: fileCap, rootCap: 1 << 30),
+               staging: Staging(root: fixture.location.stagingRoot, fileCap: fileCap, rootCap: 1 << 30,
+                                log: log.logger),
                outbox: paths.outbox, policy: policy, automation: { [unowned self] in self.automation },
                now: Date.init, timing: VerifyTiming(timeout: 0.5, interval: 0.02), log: log.logger,
                onReconciled: { [unowned self] in self.reconciled.append($0) })

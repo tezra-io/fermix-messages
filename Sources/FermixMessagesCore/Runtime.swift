@@ -38,7 +38,7 @@ final class Runtime {
         let sender = Sender(
             ledger: ledger, database: { ChatDB.open(location) }, scripting: OsascriptMessages(),
             staging: Staging(root: location.stagingRoot, fileCap: Staging.standardFileCap,
-                             rootCap: Staging.standardRootCap),
+                             rootCap: Staging.standardRootCap, log: log),
             outbox: paths.outbox, policy: policy, automation: { inspector.automation(ask: false) }, now: Date.init,
             timing: .standard, log: log,
             onReconciled: { event in output.notify(Wire.encodeNotification(.sendReconciled, event)) {} })

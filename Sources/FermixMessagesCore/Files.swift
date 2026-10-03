@@ -179,17 +179,24 @@ enum FileCopy {
         hex(SHA256.hash(data: data))
     }
 
-    /// The hash of a file, read with the same cap; nil when it cannot be read.
+    /// The hash of a whole file, read with the same cap; nil when it cannot be read to
+    /// the end within the cap (a partial hash is never returned).
     static func sha256(file path: String, cap: Int64) -> String? {
-        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
-        defer { try? handle.close() }
+        let input = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard input >= 0 else { return nil }
+        defer { close(input) }
         var hasher = SHA256()
         var total: Int64 = 0
-        while total <= cap, let data = try? handle.read(upToCount: chunk), !data.isEmpty {
-            total += Int64(data.count)
-            hasher.update(data: data)
+        var buffer = [UInt8](repeating: 0, count: chunk)
+        while total <= cap {
+            let count = buffer.withUnsafeMutableBytes { read(input, $0.baseAddress, $0.count) }
+            if count < 0 && errno == EINTR { continue }
+            guard count >= 0 else { return nil }
+            if count == 0 { return hex(hasher.finalize()) }
+            total += Int64(count)
+            hasher.update(data: buffer[0..<count])
         }
-        return total <= cap ? hex(hasher.finalize()) : nil
+        return nil
     }
 
     private static func hex<D: Sequence>(_ digest: D) -> String where D.Element == UInt8 {
@@ -230,13 +237,15 @@ enum FileTree {
             let path = root + "/" + name
             let attributes = try FileManager.default.attributesOfItem(atPath: path)
             return Entry(name: name, modified: attributes[.modificationDate] as? Date ?? .distantPast,
-                         bytes: size(of: path))
+                         bytes: try size(of: path))
         }
     }
 
-    static func size(of path: String) -> Int64 {
-        guard let walker = FileManager.default.enumerator(atPath: path) else {
-            return (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int64) ?? 0
+    static func size(of path: String) throws -> Int64 {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue,
+              let walker = FileManager.default.enumerator(atPath: path) else {
+            return try FileManager.default.attributesOfItem(atPath: path)[.size] as? Int64 ?? 0
         }
         var total: Int64 = 0
         var visited = 0
