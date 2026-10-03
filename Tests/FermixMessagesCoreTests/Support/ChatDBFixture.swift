@@ -85,6 +85,19 @@ final class ChatDBFixture {
         return writer.lastInsertRowid
     }
 
+    /// The handle row for (id, service), inserted when Messages has none yet.
+    func ensureHandle(_ id: String, service: String) -> Int64 {
+        let existing = try? writer.scalarInt("SELECT ROWID FROM handle WHERE id = ? AND service = ?",
+                                             [.text(id), .text(service)])
+        return existing.flatMap { $0 } ?? handle(id, service: service)
+    }
+
+    /// The chat row with this GUID, inserted when Messages has none yet.
+    func ensureChat(_ identifier: String, service: String, guid: String) -> Int64 {
+        let existing = try? writer.scalarInt("SELECT ROWID FROM chat WHERE guid = ?", [.text(guid)])
+        return existing.flatMap { $0 } ?? chat(identifier, service: service, guid: guid)
+    }
+
     @discardableResult
     func chat(_ identifier: String, service: String = "iMessage", group: Bool = false,
               lastAddressed: String? = nil, guid: String? = nil) -> Int64 {

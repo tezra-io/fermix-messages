@@ -8,9 +8,17 @@ final class TestDirectory {
     static let prefix = "fermix-messages-tests-"
     let url: URL
 
+    /// The real path of the temporary directory (`URL.resolvingSymlinksInPath` would strip
+    /// `/private` and leave a symlinked `/var` prefix).
+    static var base: String {
+        guard let real = realpath(NSTemporaryDirectory(), nil) else { preconditionFailure("realpath(tmp)") }
+        defer { free(real) }
+        return String(cString: real)
+    }
+
     init() {
-        let base = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true).resolvingSymlinksInPath()
-        url = base.appendingPathComponent(Self.prefix + UUID().uuidString, isDirectory: true)
+        url = URL(fileURLWithPath: Self.base, isDirectory: true)
+            .appendingPathComponent(Self.prefix + UUID().uuidString, isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
         } catch {
@@ -20,6 +28,7 @@ final class TestDirectory {
 
     var path: String { url.path }
 
+    @discardableResult
     func sub(_ relative: String) -> String {
         let child = url.appendingPathComponent(relative)
         do {
@@ -31,8 +40,7 @@ final class TestDirectory {
     }
 
     deinit {
-        let base = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true).resolvingSymlinksInPath().path
-        precondition(url.path.hasPrefix(base + "/" + Self.prefix), "refusing to remove \(url.path)")
+        precondition(url.path.hasPrefix(Self.base + "/" + Self.prefix), "refusing to remove \(url.path)")
         // Restore permissions a test may have removed, then delete the tree.
         _ = try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
         let walker = FileManager.default.enumerator(atPath: url.path)

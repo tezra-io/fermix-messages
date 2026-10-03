@@ -6,6 +6,7 @@ import SQLite3
 /// after `prepare`). A connection is used by one thread at a time; callers serialize.
 public enum SQLValue: Equatable {
     case int(Int64)
+    case real(Double)
     case text(String)
     case blob(Data)
     case null
@@ -126,6 +127,7 @@ public final class SQLiteConnection {
             let rc: Int32
             switch value {
             case .int(let number): rc = sqlite3_bind_int64(statement, index, number)
+            case .real(let number): rc = sqlite3_bind_double(statement, index, number)
             case .text(let text): rc = sqlite3_bind_text(statement, index, text, -1, transient)
             case .null: rc = sqlite3_bind_null(statement, index)
             case .blob(let data):
@@ -160,6 +162,10 @@ public struct SQLiteRow {
 
     public func int(_ column: Int32) -> Int64 {
         sqlite3_column_int64(statement, column)
+    }
+
+    public func double(_ column: Int32) -> Double {
+        sqlite3_column_double(statement, column)
     }
 
     public func text(_ column: Int32) -> String? {
