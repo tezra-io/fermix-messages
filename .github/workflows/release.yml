@@ -53,7 +53,7 @@ jobs:
           lipo -archs "$BIN"
           echo "bin=$BIN" >> "$GITHUB_ENV"
       - name: Test
-        run: swift test
+        run: scripts/swift_test.sh
       - name: Import Developer ID certificate
         env:
           CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
