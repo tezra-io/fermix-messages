@@ -8,12 +8,12 @@ final class FakeConverter: MediaConverting {
 
     func convert(_ conversion: Conversion, input: String, output: String) -> Result<Void, HelperError> {
         calls.append(conversion)
-        if fails { return .failure(HelperError(.conversionFailed, "\(conversion) exited 1")) }
+        if fails { return .failure(HelperError(.pathRefused, "conversion failed: \(conversion) exited 1")) }
         do {
             try FileManager.default.copyItem(atPath: input, toPath: output)
             return .success(())
         } catch {
-            return .failure(HelperError(.conversionFailed, "\(error)"))
+            return .failure(HelperError(.pathRefused, "conversion failed: \(error)"))
         }
     }
 }
@@ -89,7 +89,8 @@ final class FetchHarness {
         let voice = harness.message(name: "a.caf", mime: "audio/x-caf")
         harness.emitAll()
         let error = harness.fetcher().fetch(AttachmentFetchParams(messageGuid: voice.guid, index: 0, convert: true))
-        #expect(error.failureValue?.kind == .conversionFailed)
+        #expect(error.failureValue?.kind == .pathRefused)
+        #expect(error.failureValue?.message.hasPrefix("conversion failed") == true)
         #expect(try FileManager.default.contentsOfDirectory(atPath: harness.inbox + "/\(voice.guid)").isEmpty)
     }
 

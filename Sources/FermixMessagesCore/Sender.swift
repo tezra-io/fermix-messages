@@ -107,7 +107,7 @@ struct Staging {
     func stage(_ source: String) -> Result<StagedFile, CopyFailure> {
         var info = stat()
         guard stat(source, &info) == 0 else { return .failure(.io("stat: \(String(cString: strerror(errno)))")) }
-        guard info.st_size <= fileCap else { return .failure(.tooLarge) }
+        guard info.st_size <= fileCap else { return .failure(.tooLarge(Int64(info.st_size))) }
         let directory = root + "/" + UUID().uuidString
         do {
             try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true,
@@ -199,21 +199,24 @@ final class Sender {
         reconcile(db)
         guard case .success(let to) = Handles.normalize(rawTo), stored.allowed.contains(to) else {
             log.event("send_refused", ["class": "policy_violation", "to": Handles.redact(rawTo)])
-            return .success(.failed(.policyViolation))
+            return .failure(.policyViolation(handle: rawTo, "recipient is outside the confirmed policy"))
         }
         do {
             if let existing = try ledger.find(key) {
                 log.event("send_replayed", ["key": key, "state": existing.state.rawValue])
                 return .success(existing.outcome)
             }
-            return .success(try dispatch(db, to: to, key: key, payload: payload))
+            return try dispatch(db, to: to, key: key, payload: payload)
         } catch {
             log.event("send_ledger_failed", ["key": key, "error": String(describing: error)])
             return .failure(HelperError(.dbUnreadable, "send ledger: \(error)"))
         }
     }
 
-    private func dispatch(_ db: ChatDB, to: String, key: String, payload: Payload) throws -> SendResult {
+    /// A refused request (a path outside the outbox, a file over the cap) is an error
+    /// response and leaves no ledger row: nothing was attempted.
+    private func dispatch(_ db: ChatDB, to: String, key: String, payload: Payload) throws
+        -> Result<SendResult, HelperError> {
         let chat = try db.directChat(handle: to)
         var textHash: String?
         var fileHash: String?
@@ -228,10 +231,8 @@ final class Sender {
                 body = staged.path
                 fileHash = staged.sha256
             case .failure(let refusal):
-                try ledger.insertFailed(key: key, chat: chat?.guid ?? "", to: to, failure: refusal.kind,
-                                        detail: refusal.message, at: now())
-                log.event("send_failed", ["key": key, "class": refusal.kind.rawValue])
-                return .failed(refusal.kind)
+                log.event("send_refused", ["key": key, "class": refusal.kind.rawValue])
+                return .failure(refusal)
             }
         }
         let command = Self.command(chat: chat, to: to, payload: payload, body: body)
@@ -242,7 +243,7 @@ final class Sender {
         log.event("send_dispatched", ["key": key, "to": Handles.redact(to), "mode": command.mode.rawValue])
         let result = try conclude(db, row: row, outcome: scripting.send(command), payload: payload)
         try ledger.prune(now: now())
-        return result
+        return .success(result)
     }
 
     private static func command(chat: DirectChat?, to: String, payload: Payload, body: String) -> ScriptCommand {
@@ -255,13 +256,15 @@ final class Sender {
     }
 
     private func prepareFile(_ path: String) -> Result<StagedFile, HelperError> {
-        guard case .success(let real) = SafePath.resolve(path, under: outbox) else {
-            return .failure(HelperError(.pathRefused, "send.file accepts only a file under the outbox"))
-        }
-        switch staging.stage(real) {
-        case .success(let staged): return .success(staged)
-        case .failure(.tooLarge): return .failure(HelperError(.attachmentTooLarge, "over \(staging.fileCap) bytes"))
-        case .failure(let other): return .failure(HelperError(.pathRefused, "staging failed: \(other)"))
+        switch SafePath.resolve(path, under: outbox) {
+        case .failure(let refusal):
+            return .failure(HelperError(.pathRefused, "path is not a file under the outbox (\(refusal.reason))"))
+        case .success(let real):
+            switch staging.stage(real) {
+            case .success(let staged): return .success(staged)
+            case .failure(.tooLarge(let bytes)): return .failure(.tooLarge(bytes: bytes, cap: staging.fileCap))
+            case .failure(let other): return .failure(HelperError(.pathRefused, "staging failed: \(other)"))
+            }
         }
     }
 

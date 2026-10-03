@@ -31,14 +31,14 @@ public enum Typedstream {
 
     /// The `decode_error` classes on the wire.
     public enum DecodeError: String, Error, Equatable {
-        case tooLarge = "too_large"
-        case badHeader = "bad_header"
-        case truncated
-        case grammar
-        case tooDeep = "too_deep"
-        case timeout
-        case invalidUTF8 = "invalid_utf8"
-        case unexpectedClass = "unexpected_class"
+        case tooLarge = "typedstream_too_large"
+        case badHeader = "typedstream_bad_header"
+        case truncated = "typedstream_truncated"
+        case grammar = "typedstream_grammar"
+        case tooDeep = "typedstream_too_deep"
+        case timeout = "typedstream_timeout"
+        case invalidUTF8 = "typedstream_invalid_utf8"
+        case unexpectedClass = "typedstream_unexpected_class"
     }
 
     static let signature = Array("streamtyped".utf8)

@@ -110,7 +110,8 @@ enum SafePath {
 }
 
 public enum CopyFailure: Error, Equatable {
-    case tooLarge
+    /// The source's size, or the bytes read when the cap was crossed during the copy.
+    case tooLarge(Int64)
     case notRegularFile
     case io(String)
 }
@@ -131,7 +132,7 @@ enum FileCopy {
         defer { close(input) }
         var info = stat()
         guard fstat(input, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { return .failure(.notRegularFile) }
-        guard info.st_size <= cap else { return .failure(.tooLarge) }
+        guard info.st_size <= cap else { return .failure(.tooLarge(Int64(info.st_size))) }
         let output = open(destination, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard output >= 0 else { return .failure(.io("create \(destination): \(String(cString: strerror(errno)))")) }
         let result = pump(input, output, cap: cap)
@@ -150,13 +151,13 @@ enum FileCopy {
             guard count >= 0 else { return .failure(.io("read: \(String(cString: strerror(errno)))")) }
             if count == 0 { return .success(CopyResult(bytes: total, sha256: hex(hasher.finalize()))) }
             total += Int64(count)
-            guard total <= cap else { return .failure(.tooLarge) }
+            guard total <= cap else { return .failure(.tooLarge(total)) }
             hasher.update(data: buffer[0..<count])
             guard writeAll(output, buffer, count) else {
                 return .failure(.io("write: \(String(cString: strerror(errno)))"))
             }
         }
-        return .failure(.tooLarge)
+        return .failure(.tooLarge(total))
     }
 
     private static func writeAll(_ fd: Int32, _ buffer: [UInt8], _ count: Int) -> Bool {

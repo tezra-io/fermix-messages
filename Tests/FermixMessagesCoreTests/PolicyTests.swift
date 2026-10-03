@@ -37,14 +37,14 @@ import Testing
     @Test func aChangedPolicyShowsOneDialogNamingEveryHandleAndIsStoredOnApprove() throws {
         let harness = Harness(stored: .dedicated())
         let result = try harness.service.set(Self.params(handles: ["+15551234567", "guest@example.com"])).get()
-        #expect(result.confirmedAt == "2026-10-03T12:00:00.000Z")
+        #expect(result.confirmedAt == "2026-10-03T12:00:00Z")
         #expect(harness.consent.requests.count == 1)
         let request = try #require(harness.consent.requests.first)
         #expect(request.title == "Allow Fermix to exchange iMessages with +1 555 123 4567 and guest@example.com?")
         #expect(request.detail.contains("dedicated account"))
         #expect(harness.store.current == StoredPolicy(
             posture: .dedicatedAccount, ownerHandle: "+15551234567", handles: ["+15551234567", "guest@example.com"],
-            confirmedAt: "2026-10-03T12:00:00.000Z", selfAliasesVerifiedAt: nil))
+            confirmedAt: "2026-10-03T12:00:00Z", selfAliasesVerifiedAt: nil))
     }
 
     @Test func theOwnerIsAlwaysInTheConfirmedSet() throws {
@@ -86,8 +86,8 @@ import Testing
 
         let me = Harness()
         let result = try me.service.set(Self.params(.ownAccount, handles: [])).get()
-        #expect(result.confirmedAt == "2026-10-03T12:00:00.000Z")
-        #expect(me.store.current?.selfAliasesVerifiedAt == "2026-10-03T12:00:00.000Z")
+        #expect(result.confirmedAt == "2026-10-03T12:00:00Z")
+        #expect(me.store.current?.selfAliasesVerifiedAt == "2026-10-03T12:00:00Z")
         #expect(me.consent.requests.first?.detail.contains("own account") == true)
     }
 

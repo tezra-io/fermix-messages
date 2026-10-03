@@ -139,15 +139,15 @@ enum BoundedChild {
         }
     }
 
-    /// Reads one pipe to EOF on a background queue, keeping at most `cap` bytes, and
-    /// closes it.
+    /// Reads one pipe to EOF on its own thread (never the shared GCD pool, which a busy
+    /// process can starve), keeping at most `cap` bytes, and closes it.
     private final class Drain {
         private let lock = NSLock()
         private var data = Data()
         private let done = DispatchSemaphore(value: 0)
 
         init(fd: Int32, cap: Int) {
-            DispatchQueue.global().async { [self] in
+            Thread.detachNewThread { [self] in
                 var buffer = [UInt8](repeating: 0, count: 16384)
                 while true {
                     let count = buffer.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, $0.count) }

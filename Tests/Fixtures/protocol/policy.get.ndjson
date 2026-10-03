@@ -1,2 +1,0 @@
-{"id":4,"method":"policy.get"}
-{"id":4,"result":{"confirmed_at":"2026-10-03T12:00:00.000Z","handles":["+15551234567","guest@example.com"],"owner_handle":"+15551234567","posture":"dedicated_account"}}

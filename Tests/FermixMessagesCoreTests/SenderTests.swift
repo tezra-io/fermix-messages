@@ -86,11 +86,11 @@ final class SendHarness {
         #expect(seen?.textSHA256 == FileCopy.sha256("Your calendar is clear."))
     }
 
-    @Test func aRecipientOutsideThePolicyFailsWithoutSendingOrRecording() throws {
+    @Test func aRecipientOutsideThePolicyIsRefusedWithoutSendingOrRecording() throws {
         let harness = SendHarness()
         for to in ["+15559999999", "not a handle"] {
-            let result = try harness.sender().sendText(Self.text(to, key: to)).get()
-            #expect(result == .failed(.policyViolation))
+            let error = harness.sender().sendText(Self.text(to, key: to)).failureValue
+            #expect(error == .policyViolation(handle: to, "recipient is outside the confirmed policy"))
             #expect(try harness.ledger.find(to) == nil)
         }
         #expect(harness.messages.commands.isEmpty)
@@ -170,8 +170,8 @@ final class SendHarness {
 
     @Test func ownAccountSendsOnlyToTheOwner() throws {
         let harness = SendHarness(policy: .own())
-        #expect(try harness.sender().sendText(Self.text("guest@example.com", key: "a")).get()
-            == .failed(.policyViolation))
+        #expect(harness.sender().sendText(Self.text("guest@example.com", key: "a")).failureValue?.kind
+            == .policyViolation)
         #expect(try harness.sender().sendText(Self.text(key: "b")).get().disposition == .recorded)
     }
 }
@@ -198,8 +198,8 @@ final class SendHarness {
         let harness = SendHarness()
         let outside = harness.fixture.directory.sub("elsewhere") + "/x.jpg"
         try Data("x".utf8).write(to: URL(fileURLWithPath: outside))
-        #expect(try harness.sender().sendFile(Self.file(outside)).get() == .failed(.pathRefused))
-        #expect(try harness.ledger.find("f-1")?.state == .failed)
+        #expect(harness.sender().sendFile(Self.file(outside)).failureValue?.kind == .pathRefused)
+        #expect(try harness.ledger.find("f-1") == nil, "a refused request is not a send")
         #expect(harness.messages.commands.isEmpty)
     }
 
@@ -209,7 +209,7 @@ final class SendHarness {
         try Data("x".utf8).write(to: URL(fileURLWithPath: outside + "/x.jpg"))
         let link = harness.paths.outbox + "/sneaky"
         #expect(symlink(outside, link) == 0)
-        #expect(try harness.sender().sendFile(Self.file(link + "/x.jpg")).get() == .failed(.pathRefused))
+        #expect(harness.sender().sendFile(Self.file(link + "/x.jpg")).failureValue?.kind == .pathRefused)
         #expect(harness.messages.commands.isEmpty)
     }
 
@@ -217,7 +217,7 @@ final class SendHarness {
         let harness = SendHarness()
         harness.fileCap = 10
         let big = harness.outboxFile("big.bin", bytes: 11)
-        #expect(try harness.sender().sendFile(Self.file(big)).get() == .failed(.attachmentTooLarge))
+        #expect(harness.sender().sendFile(Self.file(big)).failureValue == .tooLarge(bytes: 11, cap: 10))
         #expect(harness.messages.commands.isEmpty)
         let staged = (try? FileManager.default.contentsOfDirectory(atPath: harness.fixture.location.stagingRoot)) ?? []
         #expect(staged.isEmpty, "nothing is left staged")

@@ -81,6 +81,7 @@ final class Ledger {
 
     private let connection: SQLiteConnection
     private let lock = NSLock()
+    private var isClosed = false
 
     private init(connection: SQLiteConnection) {
         self.connection = connection
@@ -102,8 +103,15 @@ final class Ledger {
         return Ledger(connection: connection)
     }
 
+    /// Closes the connection once. Every write already committed with synchronous=FULL,
+    /// so nothing is lost; a later call on another lane throws instead of touching a
+    /// closed handle.
     func close() {
-        locked { connection.close() }
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isClosed else { return }
+        connection.close()
+        isClosed = true
     }
 
     func find(_ key: String) throws -> LedgerRow? {
@@ -210,9 +218,10 @@ final class Ledger {
         text.map(SQLValue.text) ?? .null
     }
 
-    private func locked<T>(_ body: () throws -> T) rethrows -> T {
+    private func locked<T>(_ body: () throws -> T) throws -> T {
         lock.lock()
         defer { lock.unlock() }
+        guard !isClosed else { throw SQLiteError(code: SQLITE_MISUSE, systemErrno: 0, message: "ledger closed") }
         return try body()
     }
 }

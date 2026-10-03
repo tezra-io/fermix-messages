@@ -1,2 +1,0 @@
-{"id":3,"method":"grant","params":{"service":"automation"}}
-{"id":3,"result":{"automation":"granted","db":"readable","full_disk_access":"granted","messages_running":true,"policy":"absent","self_aliases":[],"signed_in":true,"user_session":true}}

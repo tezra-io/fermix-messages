@@ -8,8 +8,11 @@ final class Prober {
     private let inspector: SystemInspector
     private let policy: PolicyService
     private let log: Logger
+    private let helperVersion: String
 
-    init(location: MessagesLocation, inspector: SystemInspector, policy: PolicyService, log: Logger) {
+    init(location: MessagesLocation, inspector: SystemInspector, policy: PolicyService, log: Logger,
+         helperVersion: String) {
+        self.helperVersion = helperVersion
         self.location = location
         self.inspector = inspector
         self.policy = policy
@@ -21,24 +24,9 @@ final class Prober {
         let running = inspector.messagesRunning()
         let automation = inspector.automation(ask: false)
         let signedIn = automation == .granted ? inspector.signedIn() : .unknown
-        return ProbeResult(fullDiskAccess: database.access, db: database.state, automation: automation,
+        return ProbeResult(helperVersion: helperVersion, fullDiskAccess: database.access, db: database.state, automation: automation,
                            messagesRunning: running, signedIn: signedIn, userSession: inspector.userSession(),
                            policy: policy.state(), selfAliases: database.aliases)
-    }
-
-    /// Self aliases derived the same way the probe reports them (§9.4).
-    func selfAliases() -> Result<[String], DBOpenFailure> {
-        switch ChatDB.open(location) {
-        case .failure(let failure):
-            return .failure(failure)
-        case .success(let db):
-            defer { db.close() }
-            do {
-                return .success(try db.selfAliases())
-            } catch {
-                return .failure(.unreadable(String(describing: error)))
-            }
-        }
     }
 
     private func databaseFacts() -> (access: FullDiskAccess, state: DBState, aliases: [String]?) {

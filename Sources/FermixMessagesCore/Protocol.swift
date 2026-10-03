@@ -144,8 +144,7 @@ public enum Event: String {
 
 // MARK: - Errors
 
-/// The closed error vocabulary of §6, plus `conversion_failed` (an `afconvert`/`sips`
-/// child that failed or timed out during `attachment.fetch`; §6 names no kind for it).
+/// The closed error vocabulary of §6, exactly the engine's set.
 public enum ErrorKind: String, Codable, CaseIterable {
     case notInitialized = "not_initialized"
     case protocolMismatch = "protocol_mismatch"
@@ -168,7 +167,6 @@ public enum ErrorKind: String, Codable, CaseIterable {
     case attachmentNotAdmitted = "attachment_not_admitted"
     case attachmentTooLarge = "attachment_too_large"
     case busy
-    case conversionFailed = "conversion_failed"
 }
 
 public struct HelperError: Error, Equatable, Encodable {
@@ -194,6 +192,10 @@ public struct HelperError: Error, Equatable, Encodable {
 
     static func policyViolation(handle: String, _ message: String) -> HelperError {
         HelperError(.policyViolation, message, data: ["handle": .string(handle)])
+    }
+
+    static func tooLarge(bytes: Int64, cap: Int64) -> HelperError {
+        HelperError(.attachmentTooLarge, "over \(cap / (1024 * 1024)) MB", data: ["bytes": .int(bytes)])
     }
 }
 
@@ -429,9 +431,10 @@ struct AttachmentFetchParams: Decodable, Equatable {
 
 // MARK: - Results
 
+/// `{inode, birth_time}` of chat.db; `birth_time` is ISO-8601 UTC at whole seconds.
 struct DBGeneration: Encodable, Equatable {
     let inode: UInt64
-    let birthTime: Int64
+    let birthTime: String
 
     enum CodingKeys: String, CodingKey {
         case inode
@@ -492,7 +495,9 @@ enum Tri: Encodable, Equatable {
 
 enum PolicyState: String, Encodable { case confirmed, unconfirmed, absent }
 
+/// The probe (§6) plus `helper_version`, which the engine's one-shot parser requires.
 struct ProbeResult: Encodable {
+    let helperVersion: String
     let fullDiskAccess: FullDiskAccess
     let db: DBState
     let automation: AutomationState
@@ -503,6 +508,7 @@ struct ProbeResult: Encodable {
     let selfAliases: [String]?
 
     enum CodingKeys: String, CodingKey {
+        case helperVersion = "helper_version"
         case fullDiskAccess = "full_disk_access"
         case db, automation
         case messagesRunning = "messages_running"
@@ -514,6 +520,7 @@ struct ProbeResult: Encodable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(helperVersion, forKey: .helperVersion)
         try container.encode(fullDiskAccess, forKey: .fullDiskAccess)
         try container.encode(db, forKey: .db)
         try container.encode(automation, forKey: .automation)
@@ -624,18 +631,23 @@ struct ChatRef: Encodable, Equatable {
     let group: Bool
 }
 
+/// `service` is the sender's handle.service ("iMessage" | "SMS"), or the chat's
+/// service_name for an is_me row whose handle join is null; the engine drops a row
+/// without it.
 struct SenderRef: Encodable, Equatable {
     let handle: String?
+    let service: String
     let isMe: Bool
 
     enum CodingKeys: String, CodingKey {
-        case handle
+        case handle, service
         case isMe = "is_me"
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(handle, forKey: .handle)
+        try container.encode(service, forKey: .service)
         try container.encode(isMe, forKey: .isMe)
     }
 }
@@ -721,19 +733,24 @@ struct OverflowEvent: Encodable, Equatable {
 
 enum Availability: String, Encodable { case available, unavailable }
 
+/// `db_generation` is chat.db's generation when the event was emitted (null when it
+/// cannot be stat'd), so the engine records the new generation instead of guessing.
 struct DBStateEvent: Encodable, Equatable {
     let state: Availability
     let eventClass: String?
+    let dbGeneration: DBGeneration?
 
     enum CodingKeys: String, CodingKey {
         case state
         case eventClass = "class"
+        case dbGeneration = "db_generation"
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(state, forKey: .state)
         try container.encode(eventClass, forKey: .eventClass)
+        try container.encode(dbGeneration, forKey: .dbGeneration)
     }
 }
 
@@ -745,5 +762,12 @@ struct ReconciledEvent: Encodable, Equatable {
     enum CodingKeys: String, CodingKey {
         case idempotencyKey = "idempotency_key"
         case disposition, guid
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(idempotencyKey, forKey: .idempotencyKey)
+        try container.encode(disposition, forKey: .disposition)
+        try container.encode(guid, forKey: .guid)
     }
 }

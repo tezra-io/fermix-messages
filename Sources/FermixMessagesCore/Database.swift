@@ -110,7 +110,8 @@ public final class ChatDB {
     static func generation(of path: String) -> DBGeneration? {
         var info = stat()
         guard stat(path, &info) == 0 else { return nil }
-        return DBGeneration(inode: UInt64(info.st_ino), birthTime: Int64(info.st_birthtimespec.tv_sec))
+        let born = Date(timeIntervalSince1970: TimeInterval(info.st_birthtimespec.tv_sec))
+        return DBGeneration(inode: UInt64(info.st_ino), birthTime: Timestamp.format(born))
     }
 
     private static func verify(_ connection: SQLiteConnection) -> DBOpenFailure? {
@@ -205,6 +206,23 @@ public final class ChatDB {
             ) LIMIT 64
             """) { $0.text(0) ?? "" }
         return Set(raw.compactMap { Handles.normalize($0).successValue }).sorted()
+    }
+
+    /// §9.4's alias derivation on a fresh connection, for `policy.set` under own_account.
+    static func readSelfAliases(_ location: MessagesLocation) -> Result<[String], DBOpenFailure> {
+        switch open(location) {
+        case .failure(let failure):
+            return .failure(failure)
+        case .success(let db):
+            defer { db.close() }
+            do {
+                return .success(try db.selfAliases())
+            } catch let error as SQLiteError where error.isPermissionDenied {
+                return .failure(.permissionDenied(error.message))
+            } catch {
+                return .failure(.unreadable(String(describing: error)))
+            }
+        }
     }
 
     /// The direct iMessage chat for a normalized handle, if Messages has one. SMS chats and

@@ -1,2 +1,0 @@
-{"id":10,"method":"send.file","params":{"idempotency_key":"del-2:0","mime":"image/jpeg","path":"/Users/owner/.fermix/imessage/outbox/6F1D/photo.jpg","to":"+15551234567"}}
-{"id":10,"result":{"disposition":"recorded","guid":"5C1A4E1B-0000-4000-8000-000000000044","rowid":44}}

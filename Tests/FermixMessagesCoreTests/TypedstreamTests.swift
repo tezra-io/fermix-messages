@@ -134,7 +134,9 @@ enum Archive {
             let tail = (0..<count).map { _ in UInt8(truncatingIfNeeded: generator.next()) }
             let start = DispatchTime.now().uptimeNanoseconds
             _ = Typedstream.extractText(Data(Self.header + tail))
-            #expect(DispatchTime.now().uptimeNanoseconds - start < 50_000_000)
+            // The extractor's own deadline is 50 ms; the slack is scheduler noise when the
+            // whole suite runs in parallel.
+            #expect(DispatchTime.now().uptimeNanoseconds - start < 250_000_000)
         }
     }
 

@@ -1,2 +1,0 @@
-{"id":11,"method":"attachment.fetch","params":{"convert":true,"index":0,"message_guid":"5C1A4E1B-0000-4000-8000-000000000045"}}
-{"error":{"data":{},"kind":"conversion_failed","message":"afconvert exited 1"},"id":11}

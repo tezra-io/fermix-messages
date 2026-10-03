@@ -54,7 +54,7 @@ final class FakeInspector: SystemInspector {
         let log = LogCapture().logger
         let policy = PolicyService(store: store, prompter: ScriptedConsent(), now: { TestClock.noon },
                                    userSession: { true }, selfAliases: { .success([]) }, log: log)
-        return Prober(location: location, inspector: inspector, policy: policy, log: log)
+        return Prober(location: location, inspector: inspector, policy: policy, log: log, helperVersion: "0.1.0-test")
     }
 
     @Test func aReadableDatabaseWithEveryGrantProbesGreen() {

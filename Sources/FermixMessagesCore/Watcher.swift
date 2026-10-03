@@ -294,7 +294,9 @@ final class Watcher {
     }
 
     private func notifyState(_ state: Availability, _ eventClass: String?) {
-        sink.notify(Wire.encodeNotification(.dbState, DBStateEvent(state: state, eventClass: eventClass))) {}
+        let event = DBStateEvent(state: state, eventClass: eventClass,
+                                 dbGeneration: ChatDB.generation(of: location.chatDB))
+        sink.notify(Wire.encodeNotification(.dbState, event)) {}
     }
 
     // MARK: - kqueue

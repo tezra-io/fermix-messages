@@ -232,8 +232,8 @@ final class PolicyService {
             return .success(())
         case .success(let aliases):
             log.event("owner_not_self", ["owner": Handles.redact(owner), "aliases": String(aliases.count)])
-            return .failure(HelperError(.ownerNotSelf,
-                                        "that handle is not one of this Mac's Messages account aliases"))
+            return .failure(HelperError(.ownerNotSelf, "that handle is not one of this Mac's Messages account aliases",
+                                        data: ["handle": .string(owner)]))
         }
     }
 

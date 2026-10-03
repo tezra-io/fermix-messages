@@ -229,6 +229,19 @@ final class WatchHarness {
         #expect(harness.wire.messageRowids == [prompt.rowid])
     }
 
+    @Test func anIsMeRowWithoutAHandleTakesTheChatsService() throws {
+        let harness = WatchHarness(policy: .own())
+        _ = try harness.subscribe()
+        let prompt = harness.fixture.message(.init(text: "note to self", fromMe: true, handle: 0,
+                                                   chat: harness.base.ownerChat, destination: "+15551234567"))
+        harness.watcher.tick()
+        #expect(harness.wire.messageRowids == [prompt.rowid])
+        let sender = harness.wire.events.first?.params["sender"] as? [String: Any]
+        #expect(sender?["service"] as? String == "iMessage")
+        #expect(sender?["is_me"] as? Bool == true)
+        #expect(sender?["handle"] as? String == "+15551234567")
+    }
+
     @Test func theDataPlaneGatesApplyToSubscribe() {
         let noPolicy = WatchHarness(policy: nil)
         #expect(noPolicy.watcher.subscribe(SubscribeParams(sinceRowid: nil, replay: nil, bufferLimit: 8))

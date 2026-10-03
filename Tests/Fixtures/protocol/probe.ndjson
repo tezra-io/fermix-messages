@@ -1,2 +1,0 @@
-{"id":2,"method":"probe"}
-{"id":2,"result":{"automation":"granted","db":"readable","full_disk_access":"granted","messages_running":true,"policy":"confirmed","self_aliases":["+15551234567","owner@example.com"],"signed_in":true,"user_session":true}}

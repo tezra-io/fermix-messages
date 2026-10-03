@@ -118,7 +118,7 @@ final class Feed {
     /// The decoded row when it may leave the helper under `policy`, else nil.
     func admit(_ raw: RawRow, policy: StoredPolicy, db: ChatDB) throws -> DecodedRow? {
         guard raw.isDirect, postureAdmits(raw, policy) else { return nil }
-        guard raw.handleService == "iMessage", raw.chatService == "iMessage" else {
+        guard raw.senderService == "iMessage", raw.chatService == "iMessage" else {
             noteSms(raw)
             return nil
         }

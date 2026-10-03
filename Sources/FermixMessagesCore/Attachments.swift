@@ -33,6 +33,8 @@ protocol MediaConverting: AnyObject {
 }
 
 /// `afconvert` and `sips` as bounded children (30 s, the process group killed on expiry).
+/// The closed vocabulary has no conversion kind, so a failure is `path_refused` (the
+/// requested file could not be produced) with the tool's own words in the message.
 final class ToolConverter: MediaConverting {
     static let timeout: TimeInterval = 30
 
@@ -50,11 +52,11 @@ final class ToolConverter: MediaConverting {
             let result = try BoundedChild.run(argv[0], Array(argv.dropFirst()), timeout: Self.timeout)
             guard result.termination == .exited(0) else {
                 let text = result.stderrText.trimmingCharacters(in: .whitespacesAndNewlines).prefix(300)
-                return .failure(HelperError(.conversionFailed, "\(tool) \(result.termination): \(text)"))
+                return .failure(HelperError(.pathRefused, "conversion failed: \(tool) \(result.termination): \(text)"))
             }
             return .success(())
         } catch {
-            return .failure(HelperError(.conversionFailed, "\(tool) did not start: \(error)"))
+            return .failure(HelperError(.pathRefused, "conversion failed: \(tool) did not start: \(error)"))
         }
     }
 }
@@ -127,8 +129,8 @@ final class AttachmentFetcher {
             return .failure(HelperError(.pathRefused, "inbox: \(error)"))
         }
         switch FileCopy.copy(from: real, to: destination, cap: cap) {
-        case .failure(.tooLarge):
-            return .failure(HelperError(.attachmentTooLarge, "over \(cap) bytes"))
+        case .failure(.tooLarge(let bytes)):
+            return .failure(.tooLarge(bytes: bytes, cap: cap))
         case .failure(let other):
             return .failure(HelperError(.pathRefused, "copy: \(other)"))
         case .success(let copied):
@@ -153,7 +155,7 @@ final class AttachmentFetcher {
         }
         var info = stat()
         guard stat(output, &info) == 0 else {
-            return .failure(HelperError(.conversionFailed, "\(conversion) produced no file"))
+            return .failure(HelperError(.pathRefused, "conversion failed: \(conversion) produced no file"))
         }
         return .success(AttachmentFetchResult(path: output, mime: conversion.mime, bytes: Int64(info.st_size)))
     }

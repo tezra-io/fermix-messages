@@ -31,6 +31,14 @@ extension RawRow {
     }
 }
 
+extension RawRow {
+    /// The sender's service: handle.service, or for an is_from_me row whose handle join
+    /// is null, the chat's service_name. Admission and the `message` event both read it.
+    var senderService: String? {
+        handleService ?? (isFromMe ? chatService : nil)
+    }
+}
+
 struct RawAttachment: Equatable {
     let index: Int
     let guid: String
@@ -39,9 +47,17 @@ struct RawAttachment: Equatable {
     let bytes: Int64
 }
 
-/// UTC timestamps on the wire, always with milliseconds.
+/// UTC timestamps on the wire: ISO-8601 at whole seconds ("2026-10-03T12:00:00Z"),
+/// with milliseconds only when the instant has a fraction ("…12:00:00.250Z").
 enum Timestamp {
-    private static let formatter: ISO8601DateFormatter = {
+    private static let seconds: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter
+    }()
+
+    private static let milliseconds: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         formatter.timeZone = TimeZone(identifier: "UTC")
@@ -49,11 +65,9 @@ enum Timestamp {
     }()
 
     static func format(_ date: Date) -> String {
-        formatter.string(from: date)
-    }
-
-    static func parse(_ text: String) -> Date? {
-        formatter.date(from: text)
+        let millis = (date.timeIntervalSince1970 * 1000).rounded()
+        let whole = millis.truncatingRemainder(dividingBy: 1000) == 0
+        return (whole ? seconds : milliseconds).string(from: Date(timeIntervalSince1970: millis / 1000))
     }
 }
 
@@ -89,11 +103,13 @@ struct DecodedRow {
 
     var event: MessageEvent {
         let senderHandle = raw.isFromMe ? raw.destinationCallerId : raw.handle
+        let senderService = raw.senderService ?? ""
         return MessageEvent(
             rowid: raw.rowid, guid: raw.guid,
             chat: ChatRef(rowid: raw.chatRowid, guid: raw.chatGuid, identifier: raw.chatIdentifier ?? "",
                           service: raw.chatService ?? "", group: isGroup),
-            sender: SenderRef(handle: senderHandle.flatMap { Handles.normalize($0).successValue }, isMe: raw.isFromMe),
+            sender: SenderRef(handle: senderHandle.flatMap { Handles.normalize($0).successValue },
+                              service: senderService, isMe: raw.isFromMe),
             date: Timestamp.format(date), text: text, decodeError: decodeError,
             replyToGuid: raw.threadOriginatorGuid,
             attachments: attachments.map {

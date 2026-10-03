@@ -179,7 +179,7 @@ import Testing
     @Test func smallDatesAreSeconds() {
         let seconds = ChatDBFixture.noon / 1_000_000_000
         let decoded = DecodedRow(Self.raw(date: seconds), attachments: [], now: Self.now)
-        #expect(Timestamp.format(decoded.date) == "2026-10-03T12:00:00.000Z")
+        #expect(Timestamp.format(decoded.date) == "2026-10-03T12:00:00Z")
     }
 
     @Test func aFutureDateIsClampedToNow() {
@@ -204,8 +204,8 @@ import Testing
     @Test func anUndecodableBodyIsADecodeErrorNotADrop() {
         let decoded = DecodedRow(Self.raw(text: nil, body: Data([0x04, 0x0b, 0x01])), attachments: [], now: Self.now)
         #expect(decoded.text == nil)
-        #expect(decoded.decodeError == "bad_header")
-        #expect(decoded.event.decodeError == "bad_header")
+        #expect(decoded.decodeError == "typedstream_bad_header")
+        #expect(decoded.event.decodeError == "typedstream_bad_header")
     }
 
     @Test func tapbacksAreReactionsWithTheirTarget() {
@@ -232,12 +232,12 @@ import Testing
         let attachment = RawAttachment(index: 0, guid: "AT-1", filename: "~/Library/Messages/Attachments/x/Audio Message.caf",
                                        mime: "audio/x-caf", bytes: 10)
         let event = DecodedRow(Self.raw(), attachments: [attachment], now: Self.now).event
-        #expect(event.sender == SenderRef(handle: "+15551234567", isMe: false))
+        #expect(event.sender == SenderRef(handle: "+15551234567", service: "iMessage", isMe: false))
         #expect(event.chat == ChatRef(rowid: 3, guid: "any;-;+15551234567", identifier: "+15551234567",
                                       service: "iMessage", group: false))
         #expect(event.attachments == [AttachmentRef(index: 0, guid: "AT-1", name: "Audio Message.caf",
                                                     mime: "audio/x-caf", bytes: 10)])
         let mine = DecodedRow(Self.raw(fromMe: true), attachments: [], now: Self.now).event
-        #expect(mine.sender == SenderRef(handle: "+15551234567", isMe: true))
+        #expect(mine.sender == SenderRef(handle: "+15551234567", service: "iMessage", isMe: true))
     }
 }

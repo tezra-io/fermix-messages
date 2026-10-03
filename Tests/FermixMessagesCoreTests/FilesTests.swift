@@ -72,7 +72,7 @@ import Testing
         #expect(copied.sha256 == FileCopy.sha256(Data(repeating: 7, count: 5000)))
         #expect(FileCopy.copy(from: source, to: directory.path + "/dest.bin", cap: 5000).failureValue != nil,
                 "never overwrites")
-        #expect(FileCopy.copy(from: source, to: directory.path + "/small.bin", cap: 4999).failureValue == .tooLarge)
+        #expect(FileCopy.copy(from: source, to: directory.path + "/small.bin", cap: 4999).failureValue == .tooLarge(5000))
         #expect(!FileManager.default.fileExists(atPath: directory.path + "/small.bin"), "a capped copy leaves nothing")
     }
 
