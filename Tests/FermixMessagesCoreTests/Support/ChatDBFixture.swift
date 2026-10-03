@@ -62,6 +62,17 @@ final class ChatDBFixture {
         }
     }
 
+    /// Closes and reopens the writer. SQLite reuses an open descriptor for the same inode
+    /// within one process, so a permission test must close the in-process writer first
+    /// (in production Messages is another process).
+    func closeWriter() {
+        writer.close()
+    }
+
+    func reopenWriter() {
+        writer = Self.openWriter(location.chatDB)
+    }
+
     /// Replaces chat.db with a fresh file (a new inode): what a Messages reset does.
     func replaceDatabase(seedRowid: Int64) {
         writer.close()
