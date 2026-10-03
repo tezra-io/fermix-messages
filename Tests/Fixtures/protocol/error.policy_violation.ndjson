@@ -1,0 +1,2 @@
+{"id":5,"method":"policy.set","params":{"handles":["5551234567"],"owner_handle":"+15551234567","posture":"dedicated_account"}}
+{"error":{"data":{"handle":"5551234567"},"kind":"policy_violation","message":"handle is not in normalized form (E.164 or email)"},"id":5}

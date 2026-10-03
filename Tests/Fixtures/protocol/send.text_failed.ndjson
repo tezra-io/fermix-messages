@@ -1,0 +1,2 @@
+{"id":9,"method":"send.text","params":{"idempotency_key":"del-1:0","text":"hi","to":"+15559999999"}}
+{"id":9,"result":{"class":"policy_violation","disposition":"failed"}}

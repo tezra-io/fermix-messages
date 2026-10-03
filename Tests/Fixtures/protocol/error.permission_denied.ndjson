@@ -1,0 +1,2 @@
+{"id":8,"method":"messages.after","params":{"limit":64,"since_rowid":41}}
+{"error":{"data":{"service":"full_disk_access"},"kind":"permission_denied","message":"chat.db: authorization denied"},"id":8}

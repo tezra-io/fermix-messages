@@ -1,0 +1,2 @@
+{"id":8,"method":"messages.after","params":{"limit":64,"since_rowid":41}}
+{"id":8,"result":{"has_more":false,"messages":[{"attachments":[],"chat":{"group":false,"guid":"any;-;+15551234567","identifier":"+15551234567","rowid":7,"service":"iMessage"},"date":"2026-10-03T12:00:00.250Z","decode_error":null,"guid":"5C1A4E1B-0000-4000-8000-000000000042","reaction":null,"reply_to_guid":null,"rowid":42,"sender":{"handle":"+15551234567","is_me":false},"text":"what is on my calendar today?"}]}}

@@ -1,0 +1,2 @@
+{"id":1,"method":"initialize","params":{"client":"fermix 0.13.0","protocol_version":1}}
+{"id":1,"result":{"bundle_id":"io.tezra.fermix.messages","db_generation":{"birth_time":1770428605,"inode":279744},"helper_version":"0.1.0","macos_version":"27.0.0","protocol_version":1}}

@@ -1,0 +1,2 @@
+{"id":1,"method":"probe"}
+{"error":{"data":{},"kind":"not_initialized","message":"initialize must be the first request"},"id":1}

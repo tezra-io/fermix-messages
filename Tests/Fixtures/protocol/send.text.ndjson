@@ -1,0 +1,2 @@
+{"id":9,"method":"send.text","params":{"idempotency_key":"del-1:0","text":"Your calendar is clear.","to":"+15551234567"}}
+{"id":9,"result":{"disposition":"recorded","guid":"5C1A4E1B-0000-4000-8000-000000000043","rowid":43}}

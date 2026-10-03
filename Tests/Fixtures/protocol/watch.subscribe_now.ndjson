@@ -1,0 +1,2 @@
+{"id":6,"method":"watch.subscribe","params":{"buffer_limit":256,"replay":null,"since_rowid":null}}
+{"id":6,"result":{"replay_skipped":0,"started_at_rowid":120}}

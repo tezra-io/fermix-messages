@@ -1,0 +1,2 @@
+{"id":5,"method":"policy.set","params":{"handles":["+1 555 123 4567","Guest@Example.com"],"owner_handle":"+15551234567","posture":"dedicated_account"}}
+{"id":5,"result":{"confirmed_at":"2026-10-03T12:00:00.000Z"}}

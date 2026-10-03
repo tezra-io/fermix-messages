@@ -1,0 +1,2 @@
+{"id":8,"method":"messages.after","params":{"limit":64,"since_rowid":41}}
+{"error":{"data":{"missing":["message.destination_caller_id"]},"kind":"db_schema_unexpected","message":"chat.db lacks 1 expected column"},"id":8}

@@ -1,0 +1,2 @@
+{"id":1,"method":"initialize","params":{"client":"fermix 0.13.0","protocol_version":2}}
+{"error":{"data":{"client":2,"helper":1},"kind":"protocol_mismatch","message":"helper speaks protocol 1, client asked for 2"},"id":1}

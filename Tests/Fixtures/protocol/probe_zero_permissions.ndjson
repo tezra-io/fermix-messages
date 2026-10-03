@@ -1,0 +1,2 @@
+{"id":2,"method":"probe","params":{}}
+{"id":2,"result":{"automation":"unknown","db":"unreadable","full_disk_access":"denied","messages_running":false,"policy":"absent","self_aliases":null,"signed_in":"unknown","user_session":true}}
