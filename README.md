@@ -23,3 +23,5 @@ scripts/swift_test.sh
 Protocol version and the engine's sha256 pin move together: a wire change bumps
 `protocol_version` here and the pin in the engine's `FermixCore.IMessage.HelperInstaller`
 in the same release walk.
+
+`fermix-messages rows --home DIR --since N [--limit K]` lists the rows after a cursor as the admission rule sees them (handles redacted, no text): the first thing to run when a message got no answer.

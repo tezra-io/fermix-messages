@@ -20,6 +20,7 @@ public enum Command: Equatable {
     case grant(home: String, service: Service)
     case policyGet(home: String)
     case policySet(home: String, owner: String, handles: [String])
+    case rows(home: String, since: Int64, limit: Int)
     case version
 }
 
@@ -34,6 +35,7 @@ public enum CLI {
                fermix-messages grant      --home DIR --service automation|full_disk_access
                fermix-messages policy-get --home DIR
                fermix-messages policy-set --home DIR --owner HANDLE [--handle HANDLE]...
+       fermix-messages rows       --home DIR --since ROWID [--limit N]
                fermix-messages --version
         """
 
@@ -71,6 +73,14 @@ public enum CLI {
             return flags(rest, ["--home", "--owner"], repeatable: "--handle").map { values in
                 .policySet(home: values.single["--home"]!, owner: values.single["--owner"]!, handles: values.repeated)
             }
+        case "rows":
+            return flags(rest, ["--home", "--since"], optional: ["--limit"]).flatMap { values in
+                guard let since = Int64(values.single["--since"]!) else {
+                    return .failure(UsageError(message: "--since is a row id"))
+                }
+                let limit = values.single["--limit"].flatMap(Int.init) ?? 50
+                return .success(.rows(home: values.single["--home"]!, since: since, limit: limit))
+            }
         default:
             return .failure(UsageError(message: "unknown command \(first)"))
         }
@@ -84,7 +94,7 @@ public enum CLI {
     /// Exactly the `required` flags, each once with a value, plus any number of the
     /// `repeatable` flag.
     private static func flags(_ tokens: ArraySlice<String>, _ required: Set<String>,
-                              repeatable: String? = nil) -> Result<Flags, UsageError> {
+                              repeatable: String? = nil, optional: Set<String> = []) -> Result<Flags, UsageError> {
         var values = Flags()
         var index = tokens.startIndex
         while index < tokens.endIndex {
@@ -96,7 +106,7 @@ public enum CLI {
                 values.repeated.append(value)
                 continue
             }
-            guard required.contains(flag), values.single[flag] == nil else {
+            guard required.contains(flag) || optional.contains(flag), values.single[flag] == nil else {
                 return .failure(UsageError(message: "unexpected or repeated \(flag)"))
             }
             values.single[flag] = value
@@ -124,6 +134,8 @@ public enum CLI {
         case .policySet(let home, let owner, let handles):
             let params = PolicySetParams(ownerHandle: owner, handles: handles)
             return oneShot(home) { $0.policy.set(params) }
+        case .rows(let home, let since, let limit):
+            return oneShot(home) { Diagnostics.rows(since: since, limit: limit, runtime: $0) }
         }
     }
 
