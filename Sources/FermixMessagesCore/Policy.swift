@@ -132,7 +132,6 @@ public final class KeychainPolicyStore: PolicyStore {
 /// `policy.get`, `policy.set`, the probe's `policy` field and the data-plane gate.
 final class PolicyService {
     static let notNormalized = "handle is not in normalized form (E.164 or email)"
-    static let ownAccountGuests = "own_account admits only the owner's own conversation"
 
     private let store: PolicyStore
     private let prompter: ConsentPrompter
@@ -140,6 +139,8 @@ final class PolicyService {
     private let userSession: () -> Bool
     private let selfAliases: () -> Result<[String], DBOpenFailure>
     private let log: Logger
+    private let flagLock = NSLock()
+    private var ownerIsThisMacUnder: StoredPolicy?
 
     init(store: PolicyStore, prompter: ConsentPrompter, now: @escaping () -> Date,
          userSession: @escaping () -> Bool, selfAliases: @escaping () -> Result<[String], DBOpenFailure>,
@@ -183,9 +184,11 @@ final class PolicyService {
         }
     }
 
+    /// The posture is derived here, never asked for (§9): the derivation runs on every
+    /// call, before the unchanged check, so an unreadable database never confirms.
     func set(_ params: PolicySetParams) -> Result<PolicySetResult, HelperError> {
         let candidate: StoredPolicy
-        switch normalizedCandidate(params) {
+        switch normalized(params).flatMap(derive) {
         case .success(let value): candidate = value
         case .failure(let error): return .failure(error)
         }
@@ -195,54 +198,64 @@ final class PolicyService {
         case .failure(let error): return .failure(storeError(error))
         }
         if let stored, let confirmedAt = stored.confirmedAt, stored.sameRecipients(as: candidate) {
-            return .success(PolicySetResult(confirmedAt: confirmedAt))
+            return .success(PolicySetResult(confirmedAt: confirmedAt, posture: stored.posture))
         }
         return confirm(candidate)
     }
 
-    private func normalizedCandidate(_ params: PolicySetParams) -> Result<StoredPolicy, HelperError> {
+    /// The owner and every handle in normalized form; the owner is always a handle.
+    private func normalized(_ params: PolicySetParams) -> Result<(owner: String, handles: [String]), HelperError> {
         guard case .success(let owner) = Handles.normalize(params.ownerHandle) else {
             return .failure(.policyViolation(handle: params.ownerHandle, Self.notNormalized))
         }
-        let handles: [String]
         switch Handles.normalizeAll(params.handles + [owner]) {
-        case .success(let value): handles = value
+        case .success(let handles): return .success((owner, handles))
         case .failure(.notNormalizable(let raw)): return .failure(.policyViolation(handle: raw, Self.notNormalized))
-        }
-        guard params.posture == .ownAccount else {
-            return .success(StoredPolicy(posture: params.posture, ownerHandle: owner, handles: handles,
-                                         confirmedAt: nil, selfAliasesVerifiedAt: nil))
-        }
-        if let guest = handles.first(where: { $0 != owner }) {
-            return .failure(.policyViolation(handle: guest, Self.ownAccountGuests))
-        }
-        return verifySelf(owner).map {
-            StoredPolicy(posture: .ownAccount, ownerHandle: owner, handles: handles, confirmedAt: nil,
-                         selfAliasesVerifiedAt: Timestamp.format(now()))
         }
     }
 
-    /// §9.4: under own_account the owner must be one of the account's own aliases; an
-    /// unreadable database or an empty alias set never confirms (fails closed).
-    private func verifySelf(_ owner: String) -> Result<Void, HelperError> {
+    /// §9.4's alias derivation decides the posture: an owner outside this Mac's own aliases
+    /// (an empty set included, a fresh account) is `dedicated_account`; an owner among them
+    /// is this Mac's own account, refused until the own posture is supported.
+    private func derive(_ recipients: (owner: String, handles: [String])) -> Result<StoredPolicy, HelperError> {
+        let aliases: [String]
         switch selfAliases() {
-        case .failure(let failure):
-            return .failure(failure.helperError)
-        case .success(let aliases) where aliases.contains(owner):
-            return .success(())
-        case .success(let aliases):
-            log.event("owner_not_self", ["owner": Handles.redact(owner), "aliases": String(aliases.count)])
-            return .failure(HelperError(.ownerNotSelf, "that handle is not one of this Mac's Messages account aliases",
-                                        data: ["handle": .string(owner)]))
+        case .success(let value): aliases = value
+        case .failure(let failure): return .failure(failure.helperError)
         }
+        guard !aliases.contains(recipients.owner) else {
+            log.event("owner_is_this_mac", ["owner": Handles.redact(recipients.owner), "aliases": String(aliases.count)])
+            return .failure(.ownerIsThisMac)
+        }
+        return .success(StoredPolicy(posture: .dedicatedAccount, ownerHandle: recipients.owner,
+                                     handles: recipients.handles, confirmedAt: nil,
+                                     selfAliasesVerifiedAt: Timestamp.format(now())))
+    }
+
+    /// The runtime half of the derivation (§9). On a fresh account the aliases are empty at
+    /// confirmation, so the watcher reports the owner's own self chat here; sends to the
+    /// owner are refused while the item it was seen under is in force, and a new
+    /// confirmation writes a new item. In memory: a restarted `serve` sees it again in the
+    /// rows its boot replay scans. True only the first time per item (one notification).
+    func noteOwnerIsThisMac(_ policy: StoredPolicy) -> Bool {
+        flagLock.lock()
+        defer { flagLock.unlock() }
+        guard ownerIsThisMacUnder != policy else { return false }
+        ownerIsThisMacUnder = policy
+        return true
+    }
+
+    func ownerIsThisMac(_ policy: StoredPolicy) -> Bool {
+        flagLock.lock()
+        defer { flagLock.unlock() }
+        return ownerIsThisMacUnder == policy
     }
 
     private func confirm(_ candidate: StoredPolicy) -> Result<PolicySetResult, HelperError> {
         guard userSession() else {
             return .failure(HelperError(.noUserSession, "the confirmation dialog needs a logged-in console session"))
         }
-        let request = ConsentRequest(posture: candidate.posture, owner: candidate.ownerHandle,
-                                     handles: candidate.handles)
+        let request = ConsentRequest(owner: candidate.ownerHandle, handles: candidate.handles)
         let answer = prompter.ask(request)
         log.event("policy_consent", ["answer": answer.rawValue, "handles": String(candidate.handles.count)])
         guard answer == .approved else {
@@ -254,7 +267,7 @@ final class PolicyService {
                                      handles: candidate.handles, confirmedAt: confirmedAt,
                                      selfAliasesVerifiedAt: candidate.selfAliasesVerifiedAt)
         if case .failure(let error) = store.save(confirmed) { return .failure(storeError(error)) }
-        return .success(PolicySetResult(confirmedAt: confirmedAt))
+        return .success(PolicySetResult(confirmedAt: confirmedAt, posture: confirmed.posture))
     }
 
     private func storeError(_ error: PolicyStoreError) -> HelperError {

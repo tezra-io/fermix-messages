@@ -7,13 +7,14 @@ import Testing
     final class Harness {
         let store: InMemoryPolicyStore
         let consent: ScriptedConsent
-        var aliases: Result<[String], DBOpenFailure> = .success(["+15551234567"])
+        /// This Mac's own aliases: by default a dedicated account's, which the owner is not.
+        var selfAliases: () -> Result<[String], DBOpenFailure> = { .success(["fermix@icloud.com"]) }
         var session = true
         let log = LogCapture()
         lazy var service = PolicyService(
             store: store, prompter: consent, now: { TestClock.noon },
             userSession: { [unowned self] in self.session },
-            selfAliases: { [unowned self] in self.aliases }, log: log.logger)
+            selfAliases: { [unowned self] in self.selfAliases() }, log: log.logger)
 
         init(stored: StoredPolicy? = nil, answer: ConsentAnswer = .approved) {
             store = InMemoryPolicyStore(stored)
@@ -21,15 +22,16 @@ import Testing
         }
     }
 
-    static func params(_ posture: Posture = .dedicatedAccount, owner: String = "+15551234567",
-                       handles: [String] = ["+15551234567"]) -> PolicySetParams {
-        PolicySetParams(posture: posture, ownerHandle: owner, handles: handles)
+    static func params(owner: String = "+15551234567", handles: [String] = ["+15551234567"]) -> PolicySetParams {
+        PolicySetParams(ownerHandle: owner, handles: handles)
     }
+
+    static let dedicatedSentence = "Fermix will answer messages that +1 555 123 4567 sends to this Mac's account."
 
     @Test func anUnchangedPolicyReturnsAtOnceWithoutADialog() throws {
         let harness = Harness(stored: .dedicated(guests: ["guest@example.com"]))
         let result = try harness.service.set(Self.params(handles: ["Guest@Example.com", "+1 555 123 4567"])).get()
-        #expect(result.confirmedAt == "2026-10-03T11:00:00.000Z")
+        #expect(result == PolicySetResult(confirmedAt: "2026-10-03T11:00:00.000Z", posture: .dedicatedAccount))
         #expect(harness.consent.requests.isEmpty)
         #expect(harness.store.saves == 0)
     }
@@ -37,14 +39,14 @@ import Testing
     @Test func aChangedPolicyShowsOneDialogNamingEveryHandleAndIsStoredOnApprove() throws {
         let harness = Harness(stored: .dedicated())
         let result = try harness.service.set(Self.params(handles: ["+15551234567", "guest@example.com"])).get()
-        #expect(result.confirmedAt == "2026-10-03T12:00:00Z")
+        #expect(result == PolicySetResult(confirmedAt: "2026-10-03T12:00:00Z", posture: .dedicatedAccount))
         #expect(harness.consent.requests.count == 1)
         let request = try #require(harness.consent.requests.first)
         #expect(request.title == "Allow Fermix to exchange iMessages with +1 555 123 4567 and guest@example.com?")
-        #expect(request.detail.contains("dedicated account"))
+        #expect(request.detail == Self.dedicatedSentence)
         #expect(harness.store.current == StoredPolicy(
             posture: .dedicatedAccount, ownerHandle: "+15551234567", handles: ["+15551234567", "guest@example.com"],
-            confirmedAt: "2026-10-03T12:00:00Z", selfAliasesVerifiedAt: nil))
+            confirmedAt: "2026-10-03T12:00:00Z", selfAliasesVerifiedAt: "2026-10-03T12:00:00Z"))
     }
 
     @Test func theOwnerIsAlwaysInTheConfirmedSet() throws {
@@ -73,43 +75,84 @@ import Testing
         #expect(harness.consent.requests.isEmpty)
     }
 
-    @Test func ownAccountRequiresTheOwnerToBeASelfAlias() throws {
-        let friend = Harness()
-        friend.aliases = .success(["+15551234567"])
-        let error = friend.service.set(Self.params(.ownAccount, owner: "+15550001111", handles: [])).failureValue
-        #expect(error?.kind == .ownerNotSelf)
-        #expect(friend.consent.requests.isEmpty)
-
-        let empty = Harness()
-        empty.aliases = .success([])
-        #expect(empty.service.set(Self.params(.ownAccount, handles: [])).failureValue?.kind == .ownerNotSelf)
-
-        let me = Harness()
-        let result = try me.service.set(Self.params(.ownAccount, handles: [])).get()
-        #expect(result.confirmedAt == "2026-10-03T12:00:00Z")
-        #expect(me.store.current?.selfAliasesVerifiedAt == "2026-10-03T12:00:00Z")
-        #expect(me.consent.requests.first?.detail.contains("own account") == true)
+    /// A dedicated account's chat.db: the owner writes to the account, whose own address is
+    /// the one every chat was last addressed to and every message arrived at.
+    @Test func anOwnerOutsideThisMacsAliasesIsDerivedDedicatedAndGuestsAreAccepted() throws {
+        let fixture = ChatDBFixture()
+        let owner = fixture.handle("+15551234567")
+        let chat = fixture.chat("+15551234567", lastAddressed: "fermix@icloud.com")
+        fixture.message(.init(handle: owner, chat: chat, destination: "fermix@icloud.com"))
+        let harness = Harness()
+        harness.selfAliases = { ChatDB.readSelfAliases(fixture.location) }
+        let result = try harness.service.set(Self.params(handles: ["friend@example.com"])).get()
+        #expect(result.posture == .dedicatedAccount)
+        #expect(harness.consent.requests.first?.detail == Self.dedicatedSentence)
+        #expect(harness.store.current?.posture == .dedicatedAccount)
+        #expect(harness.store.current?.handles == ["+15551234567", "friend@example.com"])
+        #expect(try harness.service.get().get()?.posture == .dedicatedAccount)
     }
 
-    @Test func ownAccountNeverConfirmsBlind() {
+    /// The owner's own account: the self chat was last addressed to the owner's address and
+    /// its messages were sent from it.
+    @Test func anOwnerWhoIsOneOfThisMacsAliasesIsRefusedWithoutADialogOrAWrite() throws {
+        let fixture = ChatDBFixture()
+        let chat = fixture.chat("+15551234567", lastAddressed: "+15551234567")
+        fixture.message(.init(fromMe: true, chat: chat, destination: "+1 (555) 123-4567"))
+        for stored in [nil, StoredPolicy.dedicated()] {
+            let harness = Harness(stored: stored)
+            harness.selfAliases = { ChatDB.readSelfAliases(fixture.location) }
+            let error = harness.service.set(Self.params(owner: "+1 555 123 4567", handles: [])).failureValue
+            #expect(error == .ownerIsThisMac)
+            #expect(error?.message == "Messages on this Mac is signed in as this address. Sign Messages in with a "
+                + "separate Apple ID for Fermix, then confirm again.")
+            #expect(harness.consent.requests.isEmpty)
+            #expect(harness.store.saves == 0)
+            #expect(harness.store.current == stored)
+            let log = harness.log.lines.joined(separator: "\n")
+            #expect(log.contains("owner_is_this_mac") && log.contains("+1555…4567") && !log.contains("+15551234567"))
+        }
+    }
+
+    /// A fresh account has no rows, so no aliases: the owner cannot be seen as this Mac at
+    /// confirmation and is treated as dedicated (the watcher catches the rest).
+    @Test func aFreshAccountWithNoAliasesIsDerivedDedicated() throws {
+        let fixture = ChatDBFixture()
+        let harness = Harness()
+        harness.selfAliases = { ChatDB.readSelfAliases(fixture.location) }
+        #expect(try harness.service.set(Self.params()).get().posture == .dedicatedAccount)
+        #expect(harness.consent.requests.count == 1)
+        #expect(harness.store.current?.posture == .dedicatedAccount)
+    }
+
+    @Test func theDerivationNeverConfirmsBlind() {
         let cases: [(DBOpenFailure, ErrorKind)] = [
             (.permissionDenied("authorization denied"), .permissionDenied),
             (.missing, .dbMissing),
             (.unreadable("disk I/O error"), .dbUnreadable),
         ]
         for (failure, kind) in cases {
-            let harness = Harness()
-            harness.aliases = .failure(failure)
-            #expect(harness.service.set(Self.params(.ownAccount, handles: [])).failureValue?.kind == kind)
-            #expect(harness.consent.requests.isEmpty)
+            for stored in [nil, StoredPolicy.dedicated()] {
+                let harness = Harness(stored: stored)
+                harness.selfAliases = { .failure(failure) }
+                #expect(harness.service.set(Self.params()).failureValue?.kind == kind, "even an unchanged policy")
+                #expect(harness.consent.requests.isEmpty)
+                #expect(harness.store.saves == 0)
+            }
         }
+        let denied = Harness()
+        denied.selfAliases = { .failure(.permissionDenied("authorization denied")) }
+        #expect(denied.service.set(Self.params()).failureValue?.data["service"] == .string("full_disk_access"))
     }
 
-    @Test func ownAccountAdmitsNoGuests() {
+    @Test func theOwnerSeenAsThisMacIsHeldForTheItemItWasSeenUnder() {
         let harness = Harness()
-        let error = harness.service.set(Self.params(.ownAccount, handles: ["+15551234567", "friend@example.com"]))
-        #expect(error.failureValue == .policyViolation(
-            handle: "friend@example.com", "own_account admits only the owner's own conversation"))
+        let confirmed = StoredPolicy.dedicated()
+        #expect(!harness.service.ownerIsThisMac(confirmed))
+        #expect(harness.service.noteOwnerIsThisMac(confirmed))
+        #expect(!harness.service.noteOwnerIsThisMac(confirmed), "reported once per item")
+        #expect(harness.service.ownerIsThisMac(confirmed))
+        #expect(!harness.service.ownerIsThisMac(.dedicated(confirmedAt: "2026-10-03T13:00:00Z")),
+                "a new confirmation is a new item")
     }
 
     @Test func theDialogNeedsAUserSession() {
@@ -122,6 +165,7 @@ import Testing
     @Test func getReturnsTheStoredItemOrNull() throws {
         #expect(try Harness().service.get().get() == nil)
         let view = try #require(try Harness(stored: .dedicated(guests: ["g@example.com"])).service.get().get())
+        #expect(view.posture == .dedicatedAccount)
         #expect(view.handles == ["+15551234567", "g@example.com"])
         #expect(view.confirmedAt == "2026-10-03T11:00:00.000Z")
     }

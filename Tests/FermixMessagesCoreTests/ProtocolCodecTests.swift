@@ -46,7 +46,8 @@ import Testing
             .filter { $0.hasSuffix(".jsonl") }.map { String($0.dropLast(".jsonl".count)) }
         let methods = Set(Method.allCases.map(\.rawValue))
         let notifications: Set<String> = ["notification.message", "notification.watch.overflow",
-                                          "notification.db.state", "notification.send.reconciled"]
+                                          "notification.db.state", "notification.send.reconciled",
+                                          "notification.policy.state"]
         #expect(Set(names) == methods.union(notifications).union(["errors"]))
     }
 
@@ -96,16 +97,13 @@ import Testing
 
         let set = try Self.lines("policy.set")
         let params = try Self.request(set[0]).params(PolicySetParams.self).get()
-        #expect(params.posture == .dedicatedAccount)
         #expect(params.ownerHandle == "+15551234567")
         #expect(params.handles == ["+15551234567", "guest@example.com"])
-        try Self.expectSame(Wire.encodeResult(id: 5, PolicySetResult(confirmedAt: "2026-10-01T09:30:00Z")), set[1],
-                            "policy.set")
+        let confirmed = PolicySetResult(confirmedAt: "2026-10-01T09:30:00Z", posture: .dedicatedAccount)
+        try Self.expectSame(Wire.encodeResult(id: 5, confirmed), set[1], "policy.set")
         try Self.expectSame(Wire.encodeError(id: 5, HelperError(.policyRefused, "the owner cancelled the confirmation")),
                             set[2], "policy.set refused")
-        let notSelf = HelperError(.ownerNotSelf, "that handle is not one of this account's aliases",
-                                  data: ["handle": .string("+15559999999")])
-        try Self.expectSame(Wire.encodeError(id: 5, notSelf), set[3], "policy.set owner_not_self")
+        try Self.expectSame(Wire.encodeError(id: 5, .ownerIsThisMac), set[3], "policy.set owner_is_this_mac")
     }
 
     @Test func watch() throws {
@@ -240,6 +238,10 @@ import Testing
         try Self.expectSame(Wire.encodeNotification(.sendReconciled, ReconciledEvent(
             idempotencyKey: "proactive:temporal:r-7:main:text:0", disposition: .uncertain, guid: nil)),
             reconciled[1], "send.reconciled uncertain")
+
+        let policyState = try Self.lines("notification.policy.state")
+        try Self.expectSame(Wire.encodeNotification(.policyState, PolicyStateEvent(
+            state: .ownerIsThisMac, owner: Handles.redact("+15551234567"))), policyState[0], "policy.state")
     }
 
     @Test func malformedLinesAreProtocolErrors() {
@@ -263,7 +265,7 @@ import Testing
             (#"{"id":1,"method":"watch.subscribe","params":{"since_rowid":null,"replay":null,"buffer_limit":0}}"#,
              { $0.params(SubscribeParams.self).failureValue }),
             (#"{"id":1,"method":"grant","params":{"service":"contacts"}}"#, { $0.params(GrantParams.self).failureValue }),
-            (#"{"id":1,"method":"policy.set","params":{"posture":"guest","owner_handle":"+15551234567","handles":[]}}"#,
+            (#"{"id":1,"method":"policy.set","params":{"handles":["+15551234567"]}}"#,
              { $0.params(PolicySetParams.self).failureValue }),
             (#"{"id":1,"method":"attachment.fetch","params":{"message_guid":"g","index":-1,"convert":false}}"#,
              { $0.params(AttachmentFetchParams.self).failureValue }),
@@ -279,7 +281,7 @@ import Testing
         #expect(ErrorKind.allCases.map(\.rawValue).sorted() == [
             "attachment_not_admitted", "attachment_too_large", "automation_refused", "busy",
             "chat_not_found", "db_missing", "db_schema_unexpected", "db_unreadable",
-            "no_user_session", "not_initialized", "not_signed_in", "owner_not_self", "path_refused",
+            "no_user_session", "not_initialized", "not_signed_in", "owner_is_this_mac", "owner_not_self", "path_refused",
             "permission_denied", "policy_absent", "policy_refused", "policy_unconfirmed",
             "policy_violation", "protocol_mismatch", "send_timeout", "service_not_imessage",
         ])

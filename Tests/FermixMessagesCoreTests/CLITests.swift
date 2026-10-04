@@ -12,12 +12,11 @@ import Testing
         #expect(CLI.parse(["grant", "--home", "/h", "--service", "full_disk_access"])
             == .success(.grant(home: "/h", service: .fullDiskAccess)))
         #expect(CLI.parse(["policy-get", "--home", "/h"]) == .success(.policyGet(home: "/h")))
-        #expect(CLI.parse(["policy-set", "--home", "/h", "--posture", "dedicated_account", "--owner", "+15551234567",
+        #expect(CLI.parse(["policy-set", "--home", "/h", "--owner", "+15551234567",
                            "--handle", "+15551234567", "--handle", "guest@example.com"])
-            == .success(.policySet(home: "/h", posture: .dedicatedAccount, owner: "+15551234567",
-                                   handles: ["+15551234567", "guest@example.com"])))
-        #expect(CLI.parse(["policy-set", "--home", "/h", "--posture", "own_account", "--owner", "a@b.co"])
-            == .success(.policySet(home: "/h", posture: .ownAccount, owner: "a@b.co", handles: [])))
+            == .success(.policySet(home: "/h", owner: "+15551234567", handles: ["+15551234567", "guest@example.com"])))
+        #expect(CLI.parse(["policy-set", "--owner", "a@b.co", "--home", "/h"])
+            == .success(.policySet(home: "/h", owner: "a@b.co", handles: [])))
     }
 
     @Test func usageErrorsAreRefused() {
@@ -25,9 +24,10 @@ import Testing
             [], ["help"], ["serve"], ["serve", "--home"], ["serve", "--home", "/h", "--home", "/i"],
             ["serve", "--home", "/h", "--extra", "x"], ["probe", "/h"], ["grant", "--home", "/h"],
             ["grant", "--home", "/h", "--service", "contacts"], ["policy-get"], ["policy", "get", "--home", "/h"],
-            ["policy-set", "--home", "/h", "--posture", "dedicated_account"],
-            ["policy-set", "--home", "/h", "--posture", "guest", "--owner", "x"],
-            ["policy-set", "--home", "/h", "--posture", "own_account", "--owner", "x", "--handle"],
+            ["policy-set", "--home", "/h"],
+            ["policy-set", "--home", "/h", "--posture", "dedicated_account", "--owner", "x"],
+            ["policy-set", "--home", "/h", "--owner", "x", "--owner", "y"],
+            ["policy-set", "--home", "/h", "--owner", "x", "--handle"],
             ["policy-get", "--home", "/h", "--handle", "x"],
             ["--version", "extra"],
         ]

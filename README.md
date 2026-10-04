@@ -6,7 +6,9 @@ read-only, sends through Messages.app, and keeps the recipient policy the owner 
 in its own keychain item. The engine talks to it over NDJSON on stdio
 (`fermix-messages serve --home DIR`); the control plane also runs as one-shot commands
 that print one JSON object: `probe`, `grant --service automation|full_disk_access`,
-`policy-get`, `policy-set --posture P --owner H [--handle H]...`.
+`policy-get`, `policy-set --owner H [--handle H]...`. The posture is not chosen: `policy-set`
+derives it from the signed-in account's own aliases in chat.db (an owner outside them is
+`dedicated_account`; an owner among them is refused with `owner_is_this_mac`).
 
 The design is `docs/design/MILESTONE_54_IMESSAGE_CHANNEL.md` in the engine repo. The
 helper holds the two macOS grants (Full Disk Access, Automation → Messages) so the

@@ -17,7 +17,10 @@ final class WatchHarness {
     }
 
     lazy var feed = Feed(location: fixture.location, policy: base.policy, ledger: base.ledger, emitted: emitted,
-                         log: base.log.logger, now: { [unowned self] in self.clock })
+                         log: base.log.logger, now: { [unowned self] in self.clock },
+                         onOwnerIsThisMac: { [wire] event in
+                             wire.notify(Wire.encodeNotification(.policyState, event)) {}
+                         })
     lazy var watcher = Watcher(location: fixture.location, feed: feed, sink: wire,
                                log: base.log.logger, now: { [unowned self] in self.clock },
                                pollInterval: 0.05, joinHold: joinHold)
@@ -240,6 +243,53 @@ final class WatchHarness {
         #expect(sender?["service"] as? String == "iMessage")
         #expect(sender?["is_me"] as? Bool == true)
         #expect(sender?["handle"] as? String == "+15551234567")
+    }
+
+    /// A fresh account had no aliases at confirmation, so the owner's own Apple ID was
+    /// derived dedicated; the owner's self chat on this Mac gives it away.
+    @Test func theOwnersSelfChatUnderADedicatedPolicyIsReportedOnceAndRefusesSendsToTheOwner() throws {
+        let harness = WatchHarness()
+        _ = try harness.subscribe()
+        let typed = harness.fixture.message(.init(text: "note to self", fromMe: true, handle: harness.base.owner,
+                                                  chat: harness.base.ownerChat))
+        harness.fixture.message(.init(text: "another", fromMe: true, handle: harness.base.owner,
+                                      chat: harness.base.ownerChat))
+        let guest = harness.inbound("guest", from: "guest@example.com")
+        harness.watcher.tick()
+        #expect(harness.wire.messageRowids == [guest.rowid])
+        #expect(!harness.emitted.contains(typed.guid))
+        let states = harness.wire.events.filter { $0.event == "policy.state" }
+        #expect(states.count == 1, "once, not per row")
+        #expect(states.first?.params["state"] as? String == "owner_is_this_mac")
+        #expect(states.first?.params["owner"] as? String == "+1555…4567")
+        #expect(!harness.base.log.lines.joined(separator: "\n").contains("+15551234567"))
+
+        let sender = harness.base.sender()
+        #expect(sender.sendText(SenderTests.text(key: "to-owner")).failureValue == .ownerIsThisMac)
+        #expect(try sender.sendText(SenderTests.text("guest@example.com", key: "to-guest")).get().disposition
+            == .recorded)
+        #expect(harness.base.messages.commands.map(\.target) == ["any;-;guest@example.com"])
+
+        _ = harness.base.store.save(.dedicated(guests: ["guest@example.com"], confirmedAt: "2026-10-03T13:00:00Z"))
+        #expect(try sender.sendText(SenderTests.text(key: "after")).get().disposition == .recorded,
+                "a new confirmation lifts the refusal")
+        harness.watcher.tick()
+        #expect(harness.wire.events.filter { $0.event == "policy.state" }.count == 1)
+    }
+
+    @Test func fermixsOwnSendsToTheOwnerAreNotTheOwnersSelfChat() throws {
+        let harness = WatchHarness()
+        _ = try harness.subscribe()
+        #expect(try harness.base.sender().sendText(SenderTests.text()).get().disposition == .recorded)
+        try harness.base.ledger.insertDispatched(LedgerRow(
+            key: "in-flight", chat: "any;-;+15551234567", to: "+15551234567",
+            textSHA256: FileCopy.sha256("on its way"), fileSHA256: nil, watermark: 0, state: .dispatched,
+            startedAt: harness.clock, guid: nil, rowid: nil, finishedAt: nil, failureClass: nil, detail: nil))
+        harness.fixture.message(.init(text: "on its way", fromMe: true, handle: harness.base.owner,
+                                      chat: harness.base.ownerChat))
+        harness.watcher.tick()
+        #expect(harness.wire.events.isEmpty)
+        #expect(try harness.base.sender().sendText(SenderTests.text(key: "again")).get().disposition == .recorded)
     }
 
     @Test func theDataPlaneGatesApplyToSubscribe() {

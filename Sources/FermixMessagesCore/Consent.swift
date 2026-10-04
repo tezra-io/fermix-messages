@@ -7,9 +7,10 @@ public enum ConsentAnswer: String {
     case timedOut = "timed_out"
 }
 
-/// What the owner is asked: the posture and every handle, in the dialog's display form.
+/// What the owner is asked: every handle, in the dialog's display form, and the posture
+/// derived for them. Only the dedicated posture reaches the dialog: an owner who is this
+/// Mac's own account is refused before it.
 public struct ConsentRequest: Equatable {
-    public let posture: Posture
     public let owner: String
     public let handles: [String]
 
@@ -18,16 +19,7 @@ public struct ConsentRequest: Equatable {
     }
 
     public var detail: String {
-        switch posture {
-        case .dedicatedAccount:
-            return "Posture: dedicated account. Messages on this Mac is signed in to an Apple ID used only "
-                + "by Fermix. Fermix will read and send iMessages only in direct conversations with the "
-                + "handles above. The owner is \(Handles.display(owner))."
-        case .ownAccount:
-            return "Posture: own account. Messages on this Mac is signed in to your own Apple ID. Fermix "
-                + "will read and send iMessages only in your conversation with yourself "
-                + "(\(Handles.display(owner)))."
-        }
+        "Fermix will answer messages that \(Handles.display(owner)) sends to this Mac's account."
     }
 
     static func list(_ items: [String]) -> String {

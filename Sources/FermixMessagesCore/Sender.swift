@@ -206,6 +206,10 @@ final class Sender {
             log.event("send_refused", ["class": "policy_violation", "to": Handles.redact(rawTo)])
             return .failure(.policyViolation(handle: rawTo, "recipient is outside the confirmed policy"))
         }
+        if to == stored.ownerHandle, policy.ownerIsThisMac(stored) {
+            log.event("send_refused", ["class": "owner_is_this_mac", "to": Handles.redact(to)])
+            return .failure(.ownerIsThisMac)
+        }
         do {
             if let existing = try ledger.find(key) {
                 log.event("send_replayed", ["key": key, "state": existing.state.rawValue])

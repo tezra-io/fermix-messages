@@ -140,6 +140,7 @@ public enum Event: String {
     case watchOverflow = "watch.overflow"
     case dbState = "db.state"
     case sendReconciled = "send.reconciled"
+    case policyState = "policy.state"
 }
 
 // MARK: - Errors
@@ -156,7 +157,9 @@ public enum ErrorKind: String, Codable, CaseIterable {
     case policyUnconfirmed = "policy_unconfirmed"
     case policyRefused = "policy_refused"
     case policyViolation = "policy_violation"
+    // No longer produced: the posture is derived and nothing asks for own_account.
     case ownerNotSelf = "owner_not_self"
+    case ownerIsThisMac = "owner_is_this_mac"
     case notSignedIn = "not_signed_in"
     case noUserSession = "no_user_session"
     case serviceNotImessage = "service_not_imessage"
@@ -193,6 +196,12 @@ public struct HelperError: Error, Equatable, Encodable {
     static func policyViolation(handle: String, _ message: String) -> HelperError {
         HelperError(.policyViolation, message, data: ["handle": .string(handle)])
     }
+
+    /// The owner handle is one of this Mac's own Messages addresses (§9): refused at
+    /// `policy.set`, and for sends to the owner once the watcher has seen it.
+    static let ownerIsThisMac = HelperError(
+        .ownerIsThisMac, "Messages on this Mac is signed in as this address. Sign Messages in with a separate "
+            + "Apple ID for Fermix, then confirm again.")
 
     static func tooLarge(bytes: Int64, cap: Int64) -> HelperError {
         HelperError(.attachmentTooLarge, "over \(cap / (1024 * 1024)) MB", data: ["bytes": .int(bytes)])
@@ -261,13 +270,12 @@ struct GrantParams: Decodable {
     let service: Service
 }
 
+/// No posture: the helper derives it from this Mac's own aliases (§9).
 struct PolicySetParams: Decodable {
-    let posture: Posture
     let ownerHandle: String
     let handles: [String]
 
     enum CodingKeys: String, CodingKey {
-        case posture
         case ownerHandle = "owner_handle"
         case handles
     }
@@ -554,10 +562,14 @@ struct PolicyView: Encodable {
     }
 }
 
-struct PolicySetResult: Encodable {
+struct PolicySetResult: Encodable, Equatable {
     let confirmedAt: String
+    let posture: Posture
 
-    enum CodingKeys: String, CodingKey { case confirmedAt = "confirmed_at" }
+    enum CodingKeys: String, CodingKey {
+        case confirmedAt = "confirmed_at"
+        case posture
+    }
 }
 
 struct SubscribeResult: Encodable, Equatable {
@@ -752,6 +764,17 @@ struct DBStateEvent: Encodable, Equatable {
         try container.encode(eventClass, forKey: .eventClass)
         try container.encode(dbGeneration, forKey: .dbGeneration)
     }
+}
+
+/// The confirmed policy no longer holds as confirmed. One state today: the watcher saw
+/// the owner's own self chat under a dedicated policy. `owner` is redacted.
+struct PolicyStateEvent: Encodable, Equatable {
+    enum State: String, Encodable {
+        case ownerIsThisMac = "owner_is_this_mac"
+    }
+
+    let state: State
+    let owner: String
 }
 
 struct ReconciledEvent: Encodable, Equatable {

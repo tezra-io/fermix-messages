@@ -59,17 +59,19 @@ final class Feed {
     private let ledger: Ledger
     private let log: Logger
     let now: () -> Date
+    private let onOwnerIsThisMac: (PolicyStateEvent) -> Void
     private let lock = NSLock()
     private var smsLogged = Set<String>()
 
     init(location: MessagesLocation, policy: PolicyService, ledger: Ledger, emitted: EmittedRegistry, log: Logger,
-         now: @escaping () -> Date) {
+         now: @escaping () -> Date, onOwnerIsThisMac: @escaping (PolicyStateEvent) -> Void) {
         self.location = location
         self.policy = policy
         self.ledger = ledger
         self.emitted = emitted
         self.log = log
         self.now = now
+        self.onOwnerIsThisMac = onOwnerIsThisMac
     }
 
     /// The data-plane gate: a readable chat.db and a confirmed policy.
@@ -117,7 +119,7 @@ final class Feed {
 
     /// The decoded row when it may leave the helper under `policy`, else nil.
     func admit(_ raw: RawRow, policy: StoredPolicy, db: ChatDB) throws -> DecodedRow? {
-        guard raw.isDirect, postureAdmits(raw, policy) else { return nil }
+        guard raw.isDirect, try !ownersSelfChat(raw, policy, db: db), postureAdmits(raw, policy) else { return nil }
         guard raw.senderService == "iMessage", raw.chatService == "iMessage" else {
             noteSms(raw)
             return nil
@@ -134,6 +136,24 @@ final class Feed {
     func emit(_ row: DecodedRow) -> MessageEvent {
         emitted.insert(row.raw.guid)
         return row.event
+    }
+
+    /// §9, the fresh-account case the derivation at `policy.set` could not see: under a
+    /// dedicated policy, an is_from_me row in the owner's direct chat that Fermix did not
+    /// send means Messages here is signed in as the owner. Never admitted; reported once.
+    private func ownersSelfChat(_ raw: RawRow, _ policy: StoredPolicy, db: ChatDB) throws -> Bool {
+        guard policy.posture == .dedicatedAccount, raw.isFromMe,
+              raw.chatIdentifier.flatMap({ Handles.normalize($0).successValue }) == policy.ownerHandle else {
+            return false
+        }
+        let decoded = DecodedRow(raw, attachments: try db.attachments(messageRowid: raw.rowid), now: now())
+        guard try !ledger.isFermixOwn(echoProbe(decoded), now: now()) else { return false }
+        if self.policy.noteOwnerIsThisMac(policy) {
+            let owner = Handles.redact(policy.ownerHandle)
+            log.event("owner_is_this_mac", ["owner": owner, "rowid": String(raw.rowid)])
+            onOwnerIsThisMac(PolicyStateEvent(state: .ownerIsThisMac, owner: owner))
+        }
+        return true
     }
 
     private func postureAdmits(_ raw: RawRow, _ policy: StoredPolicy) -> Bool {

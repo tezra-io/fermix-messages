@@ -19,7 +19,7 @@ public enum Command: Equatable {
     case probe(home: String)
     case grant(home: String, service: Service)
     case policyGet(home: String)
-    case policySet(home: String, posture: Posture, owner: String, handles: [String])
+    case policySet(home: String, owner: String, handles: [String])
     case version
 }
 
@@ -33,8 +33,7 @@ public enum CLI {
                fermix-messages probe      --home DIR
                fermix-messages grant      --home DIR --service automation|full_disk_access
                fermix-messages policy-get --home DIR
-               fermix-messages policy-set --home DIR --posture own_account|dedicated_account --owner HANDLE
-                                          [--handle HANDLE]...
+               fermix-messages policy-set --home DIR --owner HANDLE [--handle HANDLE]...
                fermix-messages --version
         """
 
@@ -69,12 +68,8 @@ public enum CLI {
         case "policy-get":
             return flags(rest, ["--home"]).map { .policyGet(home: $0.single["--home"]!) }
         case "policy-set":
-            return flags(rest, ["--home", "--posture", "--owner"], repeatable: "--handle").flatMap { values in
-                guard let posture = Posture(rawValue: values.single["--posture"]!) else {
-                    return .failure(UsageError(message: "--posture is own_account or dedicated_account"))
-                }
-                return .success(.policySet(home: values.single["--home"]!, posture: posture,
-                                           owner: values.single["--owner"]!, handles: values.repeated))
+            return flags(rest, ["--home", "--owner"], repeatable: "--handle").map { values in
+                .policySet(home: values.single["--home"]!, owner: values.single["--owner"]!, handles: values.repeated)
             }
         default:
             return .failure(UsageError(message: "unknown command \(first)"))
@@ -126,8 +121,8 @@ public enum CLI {
             return oneShot(home) { $0.granter.grant(service) }
         case .policyGet(let home):
             return oneShot(home) { $0.policy.get() }
-        case .policySet(let home, let posture, let owner, let handles):
-            let params = PolicySetParams(posture: posture, ownerHandle: owner, handles: handles)
+        case .policySet(let home, let owner, let handles):
+            let params = PolicySetParams(ownerHandle: owner, handles: handles)
             return oneShot(home) { $0.policy.set(params) }
         }
     }

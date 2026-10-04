@@ -34,7 +34,8 @@ final class Runtime {
         let location = location
         let inspector = inspector
         let feed = Feed(location: location, policy: policy, ledger: ledger, emitted: EmittedRegistry(), log: log,
-                        now: Date.init)
+                        now: Date.init,
+                        onOwnerIsThisMac: { event in output.notify(Wire.encodeNotification(.policyState, event)) {} })
         let sender = Sender(
             ledger: ledger, database: { ChatDB.open(location) }, scripting: OsascriptMessages(),
             staging: Staging(root: location.stagingRoot, fileCap: Staging.standardFileCap,

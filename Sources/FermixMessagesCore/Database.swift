@@ -194,7 +194,7 @@ public final class ChatDB {
 
     /// §9.4: the account's own aliases, from the handle each chat was last addressed to and
     /// the caller id each message was sent from or received at. Normalized; anything not in
-    /// a normalizable form is left out (the own posture then fails closed).
+    /// a normalizable form is left out.
     func selfAliases() throws -> [String] {
         let raw = try connection.query("""
             SELECT value FROM (
@@ -208,7 +208,7 @@ public final class ChatDB {
         return Set(raw.compactMap { Handles.normalize($0).successValue }).sorted()
     }
 
-    /// §9.4's alias derivation on a fresh connection, for `policy.set` under own_account.
+    /// §9.4's alias derivation on a fresh connection, for `policy.set`'s posture.
     static func readSelfAliases(_ location: MessagesLocation) -> Result<[String], DBOpenFailure> {
         switch open(location) {
         case .failure(let failure):

@@ -178,6 +178,17 @@ final class ServerHarness {
         #expect(harness.output.errorKind(6) == "attachment_not_admitted")
     }
 
+    @Test func policySetAnswersWithTheDerivedPosture() throws {
+        let harness = ServerHarness(policy: nil)
+        harness.initialize()
+        harness.send(#"{"id":1,"method":"policy.set","params":{"owner_handle":"+15551234567","handles":[]}}"#)
+        let result = try #require(harness.output.result(1))
+        #expect(result["posture"] as? String == "dedicated_account")
+        #expect(result["confirmed_at"] is String)
+        harness.send(#"{"id":2,"method":"policy.get"}"#)
+        #expect(harness.output.result(2)?["posture"] as? String == "dedicated_account")
+    }
+
     @Test func theDataPlaneNamesAnAbsentPolicy() {
         let harness = ServerHarness(policy: nil)
         harness.initialize()
