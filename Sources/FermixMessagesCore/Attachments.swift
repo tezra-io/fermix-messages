@@ -116,8 +116,11 @@ final class AttachmentFetcher {
         guard let source = Attachments.sourcePath(attachment.filename, location: feed.location) else {
             return .failure(HelperError(.pathRefused, "the attachment has no file on this Mac"))
         }
-        guard case .success(let real) = SafePath.resolve(source, under: feed.location.attachmentsRoot) else {
-            return .failure(HelperError(.pathRefused, "the attachment file is not under Messages' Attachments"))
+        let real: String
+        switch SafePath.resolve(source, under: feed.location.attachmentsRoot) {
+        case .success(let resolved): real = resolved
+        case .failure(let refusal):
+            return .failure(HelperError(.pathRefused, "the attachment file is not under Messages' Attachments: \(refusal.reason)"))
         }
         let directory = inbox + "/" + FileNames.sanitize(params.messageGuid)
         let name = "\(params.index)-" + FileNames.sanitize((source as NSString).lastPathComponent)
