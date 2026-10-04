@@ -35,7 +35,7 @@ public enum CLI {
                fermix-messages grant      --home DIR --service automation|full_disk_access
                fermix-messages policy-get --home DIR
                fermix-messages policy-set --home DIR --owner HANDLE [--handle HANDLE]...
-       fermix-messages rows       --home DIR --since ROWID [--limit N]
+               fermix-messages rows       --home DIR --since ROWID [--limit N]
                fermix-messages --version
         """
 
