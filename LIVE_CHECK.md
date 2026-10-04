@@ -70,6 +70,10 @@ The one-shot commands the engine calls:
 
 Helper-specific checks to run alongside:
 
+- **Self-disclaim.** Only S1 and S2 prove it (CI runs `--version` through it but cannot
+  see TCC): the prompt and both Privacy rows name "Fermix Messages", never the launcher
+  (Terminal, the Fermix app). A disclaim that cannot happen exits 70, 71 or 72 with
+  `FATAL disclaim` on stderr and runs nothing.
 - **Consent dialog.** `policy-set` with a new guest shows one alert naming every handle
   ("Allow Fermix to exchange iMessages with +1 555 123 4567 and …?") and the derived posture
   ("Fermix will answer messages that +1 555 123 4567 sends to this Mac's account.");

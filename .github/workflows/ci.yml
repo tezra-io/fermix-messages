@@ -13,6 +13,16 @@ jobs:
       - run: swift build -c release
       - run: scripts/swift_test.sh
       # The bundle must assemble and sign (ad-hoc here) on every push, so a broken
-      # Info.plist or entitlements file never waits for tag time to fail.
-      - run: scripts/build_app.sh .build/release/fermix-messages dist 0.0.0-ci ""
-      - run: '"dist/Fermix Messages.app/Contents/MacOS/fermix-messages" --version'
+      # Info.plist or entitlements file never waits for tag time to fail. SwiftPM names
+      # the products directory (it moves with the build system), and the bundled binary
+      # must report the bundle's version: one that cannot see its Info.plist says
+      # "unbundled" and still exits 0.
+      - name: bundle
+        run: |
+          set -euo pipefail
+          scripts/build_app.sh "$(swift build -c release --show-bin-path)/fermix-messages" dist 0.0.0-ci ""
+          reported="$("dist/Fermix Messages.app/Contents/MacOS/fermix-messages" --version)"
+          if [ "$reported" != "fermix-messages 0.0.0-ci" ]; then
+            echo "::error title=Bundle version::the bundled binary reports '$reported'"
+            exit 1
+          fi

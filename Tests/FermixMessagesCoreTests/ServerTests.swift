@@ -26,22 +26,31 @@ final class CapturingOutput: LineOutput, NotificationSink {
         return collected.compactMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
     }
 
-    func response(_ id: Int, timeout: TimeInterval = 5) -> [String: Any]? {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let found = objects.first(where: { ($0["id"] as? NSNumber)?.intValue == id }) { return found }
-            Thread.sleep(forTimeInterval: 0.005)
-        } while Date() < deadline
-        return nil
+    func response(_ id: Int, timeout: TimeInterval = 5) async throws -> [String: Any]? {
+        try await eventually(timeout: timeout) { objects.first { ($0["id"] as? NSNumber)?.intValue == id } }
     }
 
-    func errorKind(_ id: Int) -> String? {
-        (response(id)?["error"] as? [String: Any])?["kind"] as? String
+    func errorKind(_ id: Int) async throws -> String? {
+        (try await response(id)?["error"] as? [String: Any])?["kind"] as? String
     }
 
-    func result(_ id: Int) -> [String: Any]? {
-        response(id)?["result"] as? [String: Any]
+    func result(_ id: Int) async throws -> [String: Any]? {
+        try await response(id)?["result"] as? [String: Any]
     }
+}
+
+/// Polls `probe` until it yields a value or `timeout` passes, suspending between tries.
+/// Never park the test's thread instead: the lanes are OperationQueues on GCD's
+/// width-limited pool, which starts no worker while every cooperative thread (one per
+/// core) is parked, so on a three-core CI runner three tests waiting that way starve
+/// each other's lanes until they time out.
+func eventually<T>(timeout: TimeInterval = 5, _ probe: () -> T?) async throws -> T? {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if let value = probe() { return value }
+        try await Task.sleep(nanoseconds: 5_000_000)
+    }
+    return probe()
 }
 
 final class BlockingInspector: SystemInspector {
@@ -104,31 +113,39 @@ final class ServerHarness {
         server.handle(Data(json.utf8))
     }
 
-    func initialize() {
+    /// Hands every line to the server at once, each from its own thread.
+    func sendConcurrently(_ lines: [String]) {
+        DispatchQueue.concurrentPerform(iterations: lines.count) { index in
+            send(lines[index])
+        }
+    }
+
+    func initialize() async throws {
         send(#"{"id":0,"method":"initialize","params":{"protocol_version":1,"client":"test"}}"#)
-        precondition(output.result(0) != nil, "initialize did not answer")
+        let answered = try await output.result(0)
+        precondition(answered != nil, "initialize did not answer")
     }
 }
 
 @Suite struct ServerTests {
-    @Test func everythingBeforeInitializeIsNotInitialized() {
+    @Test func everythingBeforeInitializeIsNotInitialized() async throws {
         let harness = ServerHarness()
         harness.send(#"{"id":1,"method":"probe"}"#)
         harness.send(#"{"id":2,"method":"no.such.method"}"#)
         harness.send(#"{"id":3,"method":"shutdown"}"#)
-        #expect(harness.output.errorKind(1) == "not_initialized")
-        #expect(harness.output.errorKind(2) == "not_initialized")
-        #expect(harness.output.errorKind(3) == "not_initialized")
+        #expect(try await harness.output.errorKind(1) == "not_initialized")
+        #expect(try await harness.output.errorKind(2) == "not_initialized")
+        #expect(try await harness.output.errorKind(3) == "not_initialized")
     }
 
-    @Test func initializeReportsVersionsAndTheGenerationWithoutOpeningTheDatabase() throws {
+    @Test func initializeReportsVersionsAndTheGenerationWithoutOpeningTheDatabase() async throws {
         let harness = ServerHarness()
         harness.send(#"{"id":1,"method":"initialize","params":{"protocol_version":2,"client":"test"}}"#)
-        #expect(harness.output.errorKind(1) == "protocol_mismatch")
-        let data = (harness.output.response(1)?["error"] as? [String: Any])?["data"] as? [String: Any]
+        #expect(try await harness.output.errorKind(1) == "protocol_mismatch")
+        let data = (try await harness.output.response(1)?["error"] as? [String: Any])?["data"] as? [String: Any]
         #expect((data?["helper"] as? NSNumber)?.intValue == 1)
         harness.send(#"{"id":2,"method":"initialize","params":{"protocol_version":1,"client":"test"}}"#)
-        let result = try #require(harness.output.result(2))
+        let result = try #require(await harness.output.result(2))
         #expect((result["protocol_version"] as? NSNumber)?.intValue == 1)
         #expect(result["helper_version"] as? String == "0.1.0-test")
         #expect(result["bundle_id"] as? String == "io.tezra.fermix.messages")
@@ -138,15 +155,15 @@ final class ServerHarness {
         #expect(wire["birth_time"] as? String == generation.birthTime)
     }
 
-    @Test func unknownMethodsAndMalformedParamsAreProtocolMismatchAndServingContinues() {
+    @Test func unknownMethodsAndMalformedParamsAreProtocolMismatchAndServingContinues() async throws {
         let harness = ServerHarness()
-        harness.initialize()
+        try await harness.initialize()
         #expect(harness.send(#"{"id":1,"method":"messages.delete"}"#) == .continueReading)
         harness.send(#"{"id":2,"method":"messages.after","params":{"since_rowid":"x","limit":1}}"#)
         harness.send(#"{"id":3,"method":"policy.get"}"#)
-        #expect(harness.output.errorKind(1) == "protocol_mismatch")
-        #expect(harness.output.errorKind(2) == "protocol_mismatch")
-        #expect(harness.output.response(3)?.keys.contains("result") == true)
+        #expect(try await harness.output.errorKind(1) == "protocol_mismatch")
+        #expect(try await harness.output.errorKind(2) == "protocol_mismatch")
+        #expect(try await harness.output.response(3)?.keys.contains("result") == true)
     }
 
     @Test func aMalformedLineEndsServingWithAProtocolError() {
@@ -157,112 +174,104 @@ final class ServerHarness {
         }
     }
 
-    @Test func theControlPlaneAnswersFromZeroPermissions() throws {
+    @Test func theControlPlaneAnswersFromZeroPermissions() async throws {
         let harness = ServerHarness(policy: nil)
         harness.watch.fixture.closeWriter()
         _ = unlink(harness.watch.fixture.location.chatDB)
-        harness.initialize()
+        try await harness.initialize()
         harness.send(#"{"id":1,"method":"probe"}"#)
         harness.send(#"{"id":2,"method":"policy.get"}"#)
         harness.send(#"{"id":3,"method":"messages.after","params":{"since_rowid":0,"limit":5}}"#)
         harness.send(#"{"id":4,"method":"watch.subscribe","params":{"since_rowid":null,"replay":null,"buffer_limit":8}}"#)
         harness.send(#"{"id":5,"method":"send.text","params":{"to":"+15551234567","text":"x","idempotency_key":"k"}}"#)
         harness.send(#"{"id":6,"method":"attachment.fetch","params":{"message_guid":"g","index":0,"convert":false}}"#)
-        let probe = try #require(harness.output.result(1))
+        let probe = try #require(await harness.output.result(1))
         #expect(probe["db"] as? String == "missing")
         #expect(probe["policy"] as? String == "absent")
-        #expect(harness.output.response(2)?["result"] is NSNull)
-        #expect(harness.output.errorKind(3) == "db_missing")
-        #expect(harness.output.errorKind(4) == "db_missing")
-        #expect(harness.output.errorKind(5) == "db_missing")
-        #expect(harness.output.errorKind(6) == "attachment_not_admitted")
+        #expect(try await harness.output.response(2)?["result"] is NSNull)
+        #expect(try await harness.output.errorKind(3) == "db_missing")
+        #expect(try await harness.output.errorKind(4) == "db_missing")
+        #expect(try await harness.output.errorKind(5) == "db_missing")
+        #expect(try await harness.output.errorKind(6) == "attachment_not_admitted")
     }
 
-    @Test func policySetAnswersWithTheDerivedPosture() throws {
+    @Test func policySetAnswersWithTheDerivedPosture() async throws {
         let harness = ServerHarness(policy: nil)
-        harness.initialize()
+        try await harness.initialize()
         harness.send(#"{"id":1,"method":"policy.set","params":{"owner_handle":"+15551234567","handles":[]}}"#)
-        let result = try #require(harness.output.result(1))
+        let result = try #require(await harness.output.result(1))
         #expect(result["posture"] as? String == "dedicated_account")
         #expect(result["confirmed_at"] is String)
         harness.send(#"{"id":2,"method":"policy.get"}"#)
-        #expect(harness.output.result(2)?["posture"] as? String == "dedicated_account")
+        #expect(try await harness.output.result(2)?["posture"] as? String == "dedicated_account")
     }
 
-    @Test func theDataPlaneNamesAnAbsentPolicy() {
+    @Test func theDataPlaneNamesAnAbsentPolicy() async throws {
         let harness = ServerHarness(policy: nil)
-        harness.initialize()
+        try await harness.initialize()
         harness.send(#"{"id":1,"method":"messages.after","params":{"since_rowid":0,"limit":5}}"#)
         harness.send(#"{"id":2,"method":"send.text","params":{"to":"+15551234567","text":"x","idempotency_key":"k"}}"#)
-        #expect(harness.output.errorKind(1) == "policy_absent")
-        #expect(harness.output.errorKind(2) == "policy_absent")
+        #expect(try await harness.output.errorKind(1) == "policy_absent")
+        #expect(try await harness.output.errorKind(2) == "policy_absent")
     }
 
-    @Test func moreThan32OutstandingRequestsAreBusy() {
+    @Test func moreThan32OutstandingRequestsAreBusy() async throws {
         let inspector = BlockingInspector()
         let harness = ServerHarness(inspector: inspector)
-        harness.initialize()
+        try await harness.initialize()
         for id in 1...33 {
             harness.send(#"{"id":\#(id),"method":"probe"}"#)
         }
-        #expect(harness.output.errorKind(33) == "busy")
+        #expect(try await harness.output.errorKind(33) == "busy")
         for _ in 1...32 { inspector.gate.signal() }
-        #expect(harness.output.result(32) != nil)
+        #expect(try await harness.output.result(32) != nil)
         harness.send(#"{"id":34,"method":"policy.get"}"#)
-        #expect(harness.output.response(34)?.keys.contains("result") == true)
+        #expect(try await harness.output.response(34)?.keys.contains("result") == true)
     }
 
-    @Test func twoConcurrentIdenticalSendsSerializeOnTheLane() throws {
+    @Test func twoConcurrentIdenticalSendsSerializeOnTheLane() async throws {
         let harness = ServerHarness()
-        harness.initialize()
+        try await harness.initialize()
         let request = #"{"id":ID,"method":"send.text","params":{"to":"+15551234567","text":"hi","idempotency_key":"same"}}"#
-        DispatchQueue.concurrentPerform(iterations: 2) { index in
-            harness.send(request.replacingOccurrences(of: "ID", with: String(index + 1)))
-        }
-        let first = try #require(harness.output.result(1))
-        let second = try #require(harness.output.result(2))
+        harness.sendConcurrently((1...2).map { request.replacingOccurrences(of: "ID", with: String($0)) })
+        let first = try #require(await harness.output.result(1))
+        let second = try #require(await harness.output.result(2))
         #expect(first["disposition"] as? String == "recorded")
         #expect(second["guid"] as? String == first["guid"] as? String)
         #expect(harness.watch.base.messages.commands.count == 1)
     }
 
-    @Test func dispatchedSendsAreReconciledAndAnnouncedAfterInitialize() throws {
+    @Test func dispatchedSendsAreReconciledAndAnnouncedAfterInitialize() async throws {
         let harness = ServerHarness()
         try harness.watch.base.ledger.insertDispatched(LedgerTests.dispatched("left-over", watermark: 0))
-        harness.initialize()
-        let deadline = Date().addingTimeInterval(5)
-        var event: [String: Any]?
-        repeat {
-            event = harness.output.objects.first { $0["event"] as? String == "send.reconciled" }
-            Thread.sleep(forTimeInterval: 0.01)
-        } while event == nil && Date() < deadline
+        try await harness.initialize()
+        let event = try await eventually { harness.output.objects.first { $0["event"] as? String == "send.reconciled" } }
         let params = try #require(event?["params"] as? [String: Any])
         #expect(params["idempotency_key"] as? String == "left-over")
         #expect(params["disposition"] as? String == "uncertain")
     }
 
-    @Test func shutdownAnswersClosesTheLedgerAndEndsServing() throws {
+    @Test func shutdownAnswersClosesTheLedgerAndEndsServing() async throws {
         let harness = ServerHarness()
-        harness.initialize()
+        try await harness.initialize()
         harness.send(#"{"id":1,"method":"send.text","params":{"to":"+15551234567","text":"hi","idempotency_key":"k1"}}"#)
-        #expect(harness.output.result(1)?["disposition"] as? String == "recorded")
+        #expect(try await harness.output.result(1)?["disposition"] as? String == "recorded")
         #expect(harness.send(#"{"id":2,"method":"shutdown"}"#) == .shutdown)
-        #expect(harness.output.result(2) != nil)
+        #expect(try await harness.output.result(2) != nil)
         #expect(throws: SQLiteError.self) { try harness.watch.base.ledger.find("k1") }
     }
 
-    @Test func shutdownDuringASendIsPromptAndLeavesTheRowDispatched() throws {
+    @Test func shutdownDuringASendIsPromptAndLeavesTheRowDispatched() async throws {
         let harness = ServerHarness()
         let gate = DispatchSemaphore(value: 0)
         harness.watch.base.messages.during = { _ in gate.wait() }
-        harness.initialize()
+        try await harness.initialize()
         harness.send(#"{"id":1,"method":"send.text","params":{"to":"+15551234567","text":"hi","idempotency_key":"k1"}}"#)
-        let deadline = Date().addingTimeInterval(5)
-        while harness.watch.base.messages.commands.isEmpty && Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
+        _ = try await eventually { harness.watch.base.messages.commands.first }
         let start = Date()
         #expect(harness.send(#"{"id":2,"method":"shutdown"}"#) == .shutdown)
         #expect(Date().timeIntervalSince(start) < 3, "the engine closes the port 2 s after shutdown")
-        #expect(harness.output.result(2) != nil)
+        #expect(try await harness.output.result(2) != nil)
         gate.signal()
         let reopened = try Ledger.open(path: harness.watch.base.paths.ledger)
         defer { reopened.close() }
