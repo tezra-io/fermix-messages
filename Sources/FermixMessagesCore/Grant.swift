@@ -22,11 +22,13 @@ final class Granter {
             if !inspector.messagesRunning() { _ = inspector.launchMessages() }
             _ = inspector.automation(ask: true)
         case .fullDiskAccess:
-            // There is no request API: register the bundle so the pane can list it, open
-            // the pane, and reveal the bundle for a drag-in.
+            // There is no request API: register the bundle so the pane can list it,
+            // reveal the bundle for a drag-in, then open the pane. The pane comes
+            // last so System Settings ends up in front: the switch is the point,
+            // and the Finder window is there beside it only for the drag.
             inspector.registerBundle()
-            inspector.openFullDiskAccessPane()
             inspector.revealBundle()
+            inspector.openFullDiskAccessPane()
         }
         return .success(prober.probe())
     }
