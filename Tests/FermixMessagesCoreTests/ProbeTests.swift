@@ -160,10 +160,12 @@ final class FakeInspector: SystemInspector {
         #expect(!inspector.actions.contains("launch_messages"))
     }
 
-    @Test func fullDiskAccessRegistersOpensThePaneAndReveals() throws {
+    /// The pane opens last so System Settings, where the switch is, ends up in
+    /// front of the Finder window the reveal brought up for a drag-in.
+    @Test func fullDiskAccessRegistersRevealsThenOpensThePaneInFront() throws {
         let inspector = FakeInspector()
         _ = try granter(inspector).grant(.fullDiskAccess).get()
-        #expect(inspector.actions == ["lsregister", "open_pane", "reveal"])
+        #expect(inspector.actions == ["lsregister", "reveal", "open_pane"])
     }
 
     @Test func grantingNeedsAUserSession() {
