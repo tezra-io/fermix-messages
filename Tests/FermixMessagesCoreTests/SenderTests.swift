@@ -236,7 +236,10 @@ final class SendHarness {
 
     @Test func aCrashAfterDispatchBeforeAppleScriptReconcilesUncertain() throws {
         let harness = SendHarness()
-        try harness.ledger.insertDispatched(LedgerTests.dispatched("crashed", text: "lost", watermark: 0))
+        // The harness runs on the real clock, and a send prunes the finished rows that started over 30 days
+        // before it, so the crashed send starts now: from a fixed date it is pruned once that date is 30 days old.
+        try harness.ledger.insertDispatched(LedgerTests.dispatched("crashed", text: "lost", watermark: 0,
+                                                                   startedAt: Date()))
         _ = try harness.sender().sendText(SenderTests.text(key: "next")).get()
         #expect(harness.reconciled == [ReconciledEvent(idempotencyKey: "crashed", disposition: .uncertain, guid: nil)])
         #expect(try harness.ledger.find("crashed")?.state == .uncertain)

@@ -1,0 +1,17 @@
+# Keeps the workflows' `uses:` pins current. Each pin is a commit SHA with a
+# `# vX.Y.Z` comment; Dependabot reads the comment to find the next release and
+# rewrites both. All bumps arrive as one weekly pull request, and only for
+# releases at least a week old.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: main
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns:
+          - "*"
